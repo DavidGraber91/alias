@@ -425,7 +425,7 @@ function goPlaying() {
       <button class="btn good big" data-action="correct">נכון</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-1)}</small></button>
+        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
       </div>
     </div>`,
     "play",
