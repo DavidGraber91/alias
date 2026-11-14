@@ -2,6 +2,7 @@
 // כל מסך הוא פונקציה goXxx() שבונה HTML; לחיצות מטופלות במקום אחד (ACTIONS).
 
 import * as G from "./game.js";
+import { quip } from "./quips.js";
 
 const $app = document.getElementById("app");
 const KEY_SETTINGS = "alias.settings.v1";
@@ -63,13 +64,16 @@ const save = (key, value) => {
 // נשמר רק במעברי מסך שבהם אין טיימר רץ, כדי שרענון באמצע תור יחזיר להכנה לתור
 const persist = () => save(KEY_SAVE, { game: S.game, phase: S.phase });
 
-function toast(message) {
+function toast(message, ms = 2200) {
   const el = document.createElement("div");
   el.className = "toast";
   el.textContent = message;
   document.body.append(el);
-  setTimeout(() => el.remove(), 2200);
+  setTimeout(() => el.remove(), ms);
 }
+
+// עקיצה סטלנית מקבוצה נתונה (הרשימות ב-quips.js)
+const quipHtml = (kind) => `<p class="quip">${esc(quip(kind))}</p>`;
 
 function show(html, screen) {
   document.body.dataset.screen = screen;
@@ -144,7 +148,8 @@ function goHome() {
     `
     <div class="hero">
       <h1 class="title-sticker">אליאס</h1>
-      <p class="tagline">מסבירים, מנחשים, מנצחים.<br>משחק מילים לקבוצות, על טלפון אחד.</p>
+      <p class="tagline">מסבירים, מנחשים, זורמים.<br>משחק מילים לקבוצות, על טלפון אחד.</p>
+      ${quipHtml("home")}
     </div>
     <div class="stack">
       ${canResume ? `<button class="btn primary big" data-action="resume">המשך משחק</button>` : ""}
@@ -377,6 +382,7 @@ function goReady() {
       </div>
       <div class="score-list">${rows}</div>
       <p class="lead">בחרו מי מסביר/ה והעבירו אליו/ה את הטלפון.<br>כל השאר לא מציצים!</p>
+      ${quipHtml("ready")}
     </div>
     <div class="footer">
       <button class="btn primary big" data-action="begin">מוכן/ה, מתחילים!</button>
@@ -419,7 +425,7 @@ function goPlaying() {
       <button class="btn good big" data-action="correct">נכון</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
+        <button class="btn bad" data-action="taboo">אסור<small>${signed(-1)}</small></button>
       </div>
     </div>`,
     "play",
@@ -453,6 +459,8 @@ function answer(result) {
   if (!G.markCurrent(S.game, result)) return;
   vibrate(result === "taboo" ? [30, 40, 30] : 20);
   refreshWord();
+  // מדי פעם עקיצה קצרה באמצע המשחק, לא על כל מילה ולא כשכבר יש אחת על המסך
+  if (result === "correct" && Math.random() < 0.18 && !document.querySelector(".toast")) toast(quip("play"), 2000);
 }
 
 // הטיימר מחשב לפי שעת הסיום ולא לפי ספירה, כדי שכיבוי מסך לא יעצור אותו
@@ -517,6 +525,7 @@ function goLastChance() {
     <p class="lc-sub">כולם יכולים לנחש, גם הקבוצה המסבירה.</p>
     ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
     <div class="word-card" id="card"><div class="word ${wordSize(entry.word)}">${esc(entry.word)}</div></div>
+    ${quipHtml("lastchance")}
     <p class="lead">מי ניחש/ה נכון?</p>
     <div class="stack">
       ${teamButtons}
@@ -608,6 +617,7 @@ function summaryHtml() {
         : `<p class="lead">לא נאספו מילים בתור הזה.</p>`
     }
     <div class="deltas">${deltaChips || `<span class="delta">אין שינוי בניקוד</span>`}</div>
+    ${quipHtml("summary")}
     <div class="footer">
       <button class="btn primary big" data-action="confirm-turn">אישור והמשך</button>
     </div>`;
@@ -636,6 +646,7 @@ function goTiebreak() {
       <h1 class="page-title">תיקו!</h1>
       <p class="lead">הקבוצות האלה מובילות עם ${num(g.teams[leaders[0]].score)} נקודות.<br>כל אחת משחקת עוד תור הכרעה אחד.</p>
       ${names}
+      ${quipHtml("tiebreak")}
     </div>
     <div class="footer">
       <button class="btn primary big" data-action="tiebreak-go">לסיבוב ההכרעה</button>
@@ -666,6 +677,7 @@ function goGameOver() {
       <p class="lead">${winners.length === 1 ? "הקבוצה המנצחת" : "תיקו בין הקבוצות"}</p>
       ${headline}
       <div class="score-list">${table}</div>
+      ${quipHtml("over")}
     </div>
     <div class="stack">
       <button class="btn primary big" data-action="new">משחק חדש</button>

@@ -1,16 +1,21 @@
-/* style.css — אליאס
-   שפה עיצובית: מדבקות על כחול. קו מתאר עבה בצבע דיו, צל קשיח, צבעים שטוחים.
-   הרגע הבולט היחיד הוא כרטיס המילה; כל השאר שקט ומשרת אותו. */
+/* style.css — אליאס, מהדורת סטלה.
+   רקע אפל־סגול שזז לאט, נקודות צבע זוהרות, פינות עגולות מאוד, קווי מתאר ניאון.
+   הרגע הבולט: הכותרת המתנדנדת בדף הבית וכרטיס המילה עם מסגרת קשת. כל השאר רגוע. */
 
 :root {
-  --ink: #15123a;
-  --blue: #3b44f6;
-  --paper: #ffffff;
-  --sun: #ffd23f;
-  --mint: #3ddc97;
-  --coral: #ff6b6b;
-  --lilac: #c9bcff;
-  --muted: #5a5683;
+  --night: #1a0b3d;
+  --night-2: #2b1160;
+  --ink: #1a0b3d;
+  --paper: #fff8e7;
+  --pink: #ff3ea5;
+  --orange: #ff9a3c;
+  --lemon: #ffe45e;
+  --lime: #b6ff3b;
+  --mint: #2de6c0;
+  --sky: #38c8ff;
+  --violet: #9b6bff;
+  --muted: #6a5a9a;
+  --rainbow: linear-gradient(120deg, var(--pink), var(--orange), var(--lemon), var(--lime), var(--mint), var(--sky), var(--violet), var(--pink));
   --stroke: 3px;
   --font: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif;
 }
@@ -29,9 +34,16 @@ body {
 }
 
 body {
-  background-color: var(--blue);
-  background-image: radial-gradient(rgba(255, 255, 255, 0.14) 1.5px, transparent 1.5px);
-  background-size: 22px 22px;
+  background-color: var(--night);
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(255, 62, 165, 0.55), transparent 42%),
+    radial-gradient(circle at 92% 28%, rgba(56, 200, 255, 0.45), transparent 40%),
+    radial-gradient(circle at 20% 92%, rgba(255, 154, 60, 0.45), transparent 42%),
+    radial-gradient(circle at 88% 96%, rgba(182, 255, 59, 0.30), transparent 38%),
+    linear-gradient(160deg, var(--night), var(--night-2));
+  background-size: 140% 140%, 140% 140%, 140% 140%, 140% 140%, 100% 100%;
+  background-attachment: fixed;
+  animation: drift 26s ease-in-out infinite alternate;
   color: #fff;
   font-family: var(--font);
   font-size: 18px;
@@ -41,10 +53,16 @@ body {
   user-select: none;
 }
 
+@keyframes drift {
+  from { background-position: 0% 0%, 100% 20%, 10% 100%, 100% 100%, 0 0; }
+  to { background-position: 40% 30%, 60% 0%, 50% 70%, 60% 60%, 0 0; }
+}
+
 body[data-screen="lastchance"] {
-  background-color: var(--sun);
-  background-image: radial-gradient(rgba(21, 18, 58, 0.14) 1.5px, transparent 1.5px);
-  color: var(--ink);
+  background-image:
+    radial-gradient(circle at 15% 10%, rgba(255, 228, 94, 0.75), transparent 45%),
+    radial-gradient(circle at 90% 90%, rgba(255, 62, 165, 0.6), transparent 45%),
+    linear-gradient(160deg, #ff7a2f, #ff3ea5);
 }
 
 h1,
@@ -60,15 +78,13 @@ input {
 }
 
 :focus-visible {
-  outline: 3px solid var(--sun);
+  outline: 3px solid var(--lemon);
   outline-offset: 3px;
 }
-.panel :focus-visible,
-body[data-screen="lastchance"] :focus-visible {
-  outline-color: var(--blue);
+.panel :focus-visible {
+  outline-color: var(--violet);
 }
 
-/* מספרים עם סימן (‎+1, ‎−1) נשארים בכיוון קריאה תקין בתוך טקסט עברי */
 .num {
   direction: ltr;
   unicode-bidi: isolate;
@@ -107,6 +123,7 @@ body[data-screen="lastchance"] :focus-visible {
   font-size: 2rem;
   font-weight: 900;
   line-height: 1.1;
+  text-shadow: 0 3px 0 rgba(26, 11, 61, 0.55);
 }
 
 .link {
@@ -122,12 +139,12 @@ body[data-screen="lastchance"] :focus-visible {
 
 .pill {
   display: inline-block;
-  background: var(--paper);
+  background: var(--lemon);
   color: var(--ink);
-  border: var(--stroke) solid var(--ink);
   border-radius: 999px;
   padding: 4px 14px;
   font-weight: 800;
+  box-shadow: 0 0 0 2px var(--ink), 0 0 14px rgba(255, 228, 94, 0.55);
 }
 
 .lead {
@@ -142,12 +159,33 @@ body[data-screen="lastchance"] :focus-visible {
   padding: 14px 0 4px;
   display: grid;
   gap: 8px;
-  background: linear-gradient(to top, var(--blue) 72%, transparent);
+  background: linear-gradient(to top, rgba(26, 11, 61, 0.92) 70%, transparent);
 }
 .footer .hint {
   text-align: center;
   font-weight: 700;
 }
+
+/* עקיצות */
+.quip {
+  align-self: center;
+  max-width: 100%;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 2px dashed rgba(255, 255, 255, 0.65);
+  border-radius: 22px;
+  font-weight: 800;
+  text-align: center;
+  text-wrap: balance;
+  transform: rotate(-1deg);
+}
+body[data-screen="lastchance"] .quip {
+  background: rgba(26, 11, 61, 0.75);
+  border-color: var(--lemon);
+  color: #fff;
+}
+.quip::before { content: "✦ "; color: var(--lemon); }
+.quip::after { content: " ✦"; color: var(--lemon); }
 
 /* ───────── כפתורים ───────── */
 
@@ -158,8 +196,8 @@ body[data-screen="lastchance"] :focus-visible {
   background: var(--paper);
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
-  border-radius: 16px;
-  box-shadow: 0 5px 0 var(--ink);
+  border-radius: 20px;
+  box-shadow: 0 5px 0 var(--ink), 0 8px 22px rgba(255, 62, 165, 0.35);
   font-size: 1.15rem;
   font-weight: 900;
   text-align: center;
@@ -182,19 +220,19 @@ body[data-screen="lastchance"] :focus-visible {
   font-size: 0.85rem;
   font-weight: 700;
 }
-.btn.primary { background: var(--sun); }
-.btn.good { background: var(--mint); }
-.btn.bad { background: var(--coral); }
+.btn.primary { background: linear-gradient(100deg, var(--lemon), var(--orange) 55%, var(--pink)); }
+.btn.good { background: linear-gradient(100deg, var(--lime), var(--mint)); }
+.btn.bad { background: linear-gradient(100deg, var(--pink), var(--orange)); }
 .btn.big { padding: 20px 18px; font-size: 1.4rem; }
 .btn.ghost {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
-  border-color: #fff;
+  border-color: rgba(255, 255, 255, 0.9);
   box-shadow: none;
 }
 .btn.ghost:active {
   transform: none;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 /* ───────── בית ───────── */
@@ -208,16 +246,20 @@ body[data-screen="lastchance"] :focus-visible {
 }
 .title-sticker {
   display: inline-block;
-  padding: 6px 36px 16px;
-  background: var(--sun);
+  padding: 6px 30px 16px;
+  background: linear-gradient(100deg, var(--pink), var(--orange), var(--lemon));
   color: var(--ink);
   border: 4px solid var(--ink);
-  border-radius: 28px;
-  box-shadow: 8px 8px 0 var(--ink);
+  border-radius: 46% 54% 50% 50% / 58% 48% 52% 42%;
+  box-shadow: 8px 8px 0 var(--ink), 0 0 40px rgba(255, 62, 165, 0.7);
   font-size: clamp(3.6rem, 20vw, 5.8rem);
   font-weight: 900;
   line-height: 1;
-  transform: rotate(-3deg);
+  animation: wobble 7s ease-in-out infinite;
+}
+@keyframes wobble {
+  0%, 100% { transform: rotate(-3deg) scale(1); border-radius: 46% 54% 50% 50% / 58% 48% 52% 42%; }
+  50% { transform: rotate(3deg) scale(1.04); border-radius: 54% 46% 44% 56% / 44% 58% 42% 56%; }
 }
 .tagline {
   font-size: 1.15rem;
@@ -238,11 +280,14 @@ body[data-screen="lastchance"] :focus-visible {
   display: grid;
   gap: 12px;
   padding: 16px;
-  background: var(--paper);
+  background: rgba(255, 248, 231, 0.96);
   color: var(--ink);
-  border: var(--stroke) solid var(--ink);
-  border-radius: 22px;
-  box-shadow: 0 6px 0 var(--ink);
+  border: var(--stroke) solid transparent;
+  border-radius: 26px;
+  background-image: linear-gradient(rgba(255, 248, 231, 0.97), rgba(255, 248, 231, 0.97)), var(--rainbow);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 6px 0 var(--ink), 0 10px 30px rgba(155, 107, 255, 0.45);
 }
 .panel h2 {
   font-size: 1.2rem;
@@ -277,10 +322,10 @@ body[data-screen="lastchance"] :focus-visible {
 .step {
   width: 52px;
   height: 52px;
-  background: var(--paper);
+  background: linear-gradient(135deg, var(--mint), var(--sky));
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
-  border-radius: 16px;
+  border-radius: 50%;
   box-shadow: 0 4px 0 var(--ink);
   font-size: 1.8rem;
   font-weight: 900;
@@ -294,15 +339,15 @@ body[data-screen="lastchance"] :focus-visible {
 .field {
   width: 100%;
   padding: 12px 14px;
-  background: #f4f3ff;
+  background: #efe9ff;
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
-  border-radius: 14px;
+  border-radius: 16px;
   font-weight: 700;
   -webkit-user-select: text;
   user-select: text;
 }
-.field:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.field:focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
 
 .estimate {
   display: flex;
@@ -311,9 +356,9 @@ body[data-screen="lastchance"] :focus-visible {
   justify-content: space-between;
   gap: 4px 12px;
   padding: 12px 14px;
-  background: var(--sun);
+  background: linear-gradient(100deg, var(--lemon), var(--lime));
   border: var(--stroke) solid var(--ink);
-  border-radius: 16px;
+  border-radius: 18px;
   font-weight: 800;
 }
 .estimate b { font-size: 1.25rem; font-weight: 900; }
@@ -325,7 +370,7 @@ body[data-screen="lastchance"] :focus-visible {
 }
 .chip {
   padding: 8px 16px;
-  background: var(--paper);
+  background: #fff;
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
   border-radius: 999px;
@@ -335,7 +380,7 @@ body[data-screen="lastchance"] :focus-visible {
   touch-action: manipulation;
 }
 .chip.on {
-  background: var(--sun);
+  background: linear-gradient(100deg, var(--pink), var(--orange));
   transform: translateY(2px);
   box-shadow: 0 1px 0 var(--ink);
 }
@@ -351,22 +396,22 @@ body[data-screen="lastchance"] :focus-visible {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--paper);
+  background: #fff;
   border: var(--stroke) solid var(--ink);
-  border-radius: 16px;
+  border-radius: 20px;
   cursor: pointer;
 }
-.level.on { background: var(--sun); }
+.level.on { background: linear-gradient(100deg, var(--lemon), var(--mint)); }
 .level.off { opacity: 0.45; cursor: not-allowed; }
-.level:focus-within { outline: 3px solid var(--blue); outline-offset: 2px; }
+.level:focus-within { outline: 3px solid var(--violet); outline-offset: 2px; }
 .level .tick {
   display: grid;
   place-items: center;
   width: 26px;
   height: 26px;
-  background: var(--paper);
+  background: #fff;
   border: var(--stroke) solid var(--ink);
-  border-radius: 8px;
+  border-radius: 50%;
   font-weight: 900;
   line-height: 1;
 }
@@ -390,7 +435,7 @@ body[data-screen="lastchance"] :focus-visible {
   padding: 10px 12px;
   background: #fff0d0;
   border: var(--stroke) solid var(--ink);
-  border-radius: 14px;
+  border-radius: 16px;
   font-weight: 700;
   font-size: 0.95rem;
 }
@@ -401,7 +446,7 @@ body[data-screen="lastchance"] :focus-visible {
   width: 60px;
   height: 34px;
   padding: 0;
-  background: #d9d7ee;
+  background: #d9d3f0;
   border: var(--stroke) solid var(--ink);
   border-radius: 999px;
   cursor: pointer;
@@ -417,7 +462,7 @@ body[data-screen="lastchance"] :focus-visible {
   border-radius: 50%;
   transition: inset-inline-start 0.12s;
 }
-.switch[aria-checked="true"] { background: var(--mint); }
+.switch[aria-checked="true"] { background: linear-gradient(100deg, var(--lime), var(--mint)); }
 .switch[aria-checked="true"]::after { inset-inline-start: 29px; }
 
 /* ───────── הכנה לתור ───────── */
@@ -432,12 +477,12 @@ body[data-screen="lastchance"] :focus-visible {
 .team-title {
   display: inline-block;
   max-width: 100%;
-  padding: 8px 24px;
-  background: var(--sun);
+  padding: 8px 26px;
+  background: linear-gradient(100deg, var(--lemon), var(--orange), var(--pink));
   color: var(--ink);
   border: 4px solid var(--ink);
-  border-radius: 24px;
-  box-shadow: 6px 6px 0 var(--ink);
+  border-radius: 40px;
+  box-shadow: 6px 6px 0 var(--ink), 0 0 30px rgba(255, 154, 60, 0.7);
   font-size: clamp(2rem, 10vw, 3.2rem);
   font-weight: 900;
   line-height: 1.1;
@@ -462,10 +507,10 @@ body[data-screen="lastchance"] :focus-visible {
   background: var(--paper);
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
-  border-radius: 14px;
+  border-radius: 18px;
   font-weight: 800;
 }
-.score-row.now { background: var(--sun); }
+.score-row.now { background: linear-gradient(100deg, var(--lemon), var(--lime)); }
 .score-row b { font-size: 1.35rem; font-weight: 900; }
 
 /* ───────── משחק ───────── */
@@ -488,11 +533,12 @@ body[data-screen="lastchance"] :focus-visible {
   line-height: 1;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 22px rgba(56, 200, 255, 0.9);
 }
 .bar {
   height: 18px;
-  background: var(--paper);
-  border: var(--stroke) solid var(--ink);
+  background: rgba(255, 255, 255, 0.2);
+  border: var(--stroke) solid #fff;
   border-radius: 999px;
   overflow: hidden;
 }
@@ -500,11 +546,12 @@ body[data-screen="lastchance"] :focus-visible {
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--sun);
+  background: var(--rainbow);
+  background-size: 200% 100%;
   transition: width 0.12s linear;
 }
-.timer-wrap.warn .timer { color: var(--sun); }
-.timer-wrap.warn .bar i { background: var(--coral); }
+.timer-wrap.warn .timer { color: var(--lemon); text-shadow: 0 0 22px rgba(255, 62, 165, 0.95); }
+.timer-wrap.warn .bar i { background: linear-gradient(90deg, var(--pink), var(--orange)); }
 
 .word-box {
   flex: 1;
@@ -520,11 +567,13 @@ body[data-screen="lastchance"] :focus-visible {
   display: grid;
   place-items: center;
   padding: 24px 16px;
-  background: var(--paper);
   color: var(--ink);
-  border: 4px solid var(--ink);
-  border-radius: 28px;
-  box-shadow: 8px 8px 0 var(--ink);
+  border: 6px solid transparent;
+  border-radius: 34px;
+  background-image: linear-gradient(var(--paper), var(--paper)), var(--rainbow);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 0 44px rgba(255, 62, 165, 0.65), 8px 8px 0 var(--ink);
   transform: rotate(var(--tilt));
 }
 .word-card.alt { --tilt: 1.2deg; }
@@ -553,8 +602,32 @@ body[data-screen="lastchance"] :focus-visible {
   .btn.big { padding: 14px 18px; }
 }
 
+/* עקיצה קופצת באמצע משחק */
+.toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  z-index: 10;
+  max-width: 88vw;
+  padding: 10px 18px;
+  background: var(--ink);
+  color: #fff;
+  border: 2px solid var(--lemon);
+  border-radius: 999px;
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* ───────── הזדמנות אחרונה ───────── */
 
+.lastchance { color: var(--ink); }
 .lastchance .lc-banner {
   font-size: 2.4rem;
   font-weight: 900;
@@ -562,7 +635,7 @@ body[data-screen="lastchance"] :focus-visible {
   text-align: center;
 }
 .lastchance .lc-sub { text-align: center; font-weight: 700; }
-.lastchance .timer { font-size: 2.6rem; }
+.lastchance .timer { font-size: 2.6rem; text-shadow: none; }
 .lastchance .word-card { min-height: 0; padding: 20px 16px; }
 .team-btn {
   display: flex;
@@ -586,7 +659,7 @@ body[data-screen="lastchance"] :focus-visible {
   background: var(--paper);
   color: var(--ink);
   border: var(--stroke) solid var(--ink);
-  border-radius: 14px;
+  border-radius: 18px;
   box-shadow: 0 3px 0 var(--ink);
   font-weight: 800;
   text-align: start;
@@ -602,11 +675,11 @@ body[data-screen="lastchance"] :focus-visible {
   font-weight: 800;
   white-space: nowrap;
 }
-.b-correct { background: var(--mint); }
-.b-skip { background: var(--sun); }
-.b-taboo { background: var(--coral); }
-.b-stolen { background: var(--lilac); }
-.b-missed { background: #e8e7f3; }
+.b-correct { background: var(--lime); }
+.b-skip { background: var(--lemon); }
+.b-taboo { background: var(--pink); }
+.b-stolen { background: var(--violet); color: #fff; }
+.b-missed { background: #e4defa; }
 
 .deltas { display: flex; flex-wrap: wrap; gap: 8px; }
 .delta {
@@ -617,25 +690,12 @@ body[data-screen="lastchance"] :focus-visible {
   border-radius: 999px;
   font-weight: 800;
 }
-.delta.up { background: var(--mint); }
-.delta.down { background: var(--coral); }
+.delta.up { background: var(--lime); }
+.delta.down { background: var(--pink); }
 
-/* ───────── עזרה, שגיאות, הודעות ───────── */
+/* ───────── עזרה ───────── */
 
 .howto ul { display: grid; gap: 12px; padding-inline-start: 22px; }
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  z-index: 10;
-  padding: 10px 18px;
-  background: var(--ink);
-  color: #fff;
-  border-radius: 999px;
-  font-weight: 800;
-  transform: translateX(-50%);
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
