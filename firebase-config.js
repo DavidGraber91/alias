@@ -17,6 +17,7 @@ export const firebaseConfig = {
     authDomain: "alias-f0702.firebaseapp.com",
     projectId: "alias-f0702",
     storageBucket: "alias-f0702.firebasestorage.app",
+    databaseURL: "https://alias-f0702-default-rtdb.europe-west1.firebasedatabase.app/",
     messagingSenderId: "1069152583614",
     appId: "1:1069152583614:web:925ab86f053a492f6b83ef",
     measurementId: "G-NJZBXZFQ6H"
