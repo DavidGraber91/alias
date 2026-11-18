@@ -3,13 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="text-scale" content="scale">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="theme-color" content="#1a0b3d">
-  <meta name="description" content="אליאס: משחק מילים לקבוצות, על טלפון אחד">
+  <meta name="description" content="אליאס: משחק מילים לקבוצות, מטלפון אחד או מכמה טלפונים">
   <title>אליאס</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app"></div>
+  <p id="net" class="net" role="status"></p>
+  <div id="toast" class="toast" popover="manual" role="status"></div>
+
+  <dialog id="leave-dialog" aria-labelledby="leave-title">
+    <h2 id="leave-title">לעזוב את החדר?</h2>
+    <p>המשחק ממשיך אצל האחרים, ואפשר לחזור עם אותו קוד.</p>
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" value="cancel" autofocus>להישאר</button>
+      <button class="btn bad" value="leave">לעזוב</button>
+    </form>
+  </dialog>
+
+  <dialog id="share-dialog" aria-labelledby="share-title" closedby="any">
+    <h2 id="share-title">קישור להצטרפות</h2>
+    <p>העתיקו את הקישור ושלחו אותו.</p>
+    <input class="field" readonly aria-labelledby="share-title" dir="ltr">
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" value="close" autofocus>סגירה</button>
+    </form>
+  </dialog>
+
   <noscript>צריך להפעיל JavaScript כדי לשחק.</noscript>
   <script type="module" src="app.js"></script>
 </body>
