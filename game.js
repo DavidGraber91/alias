@@ -228,7 +228,7 @@ export function turnDeltas(turn, settings, teamCount) {
         deltas[turn.teamIdx] += 1;
         break;
       case "taboo":
-        deltas[turn.teamIdx] -= 1;
+        deltas[turn.teamIdx] -= 2;
         break;
       case "skip":
         if (settings.skip === "penalty") deltas[turn.teamIdx] -= 1;
