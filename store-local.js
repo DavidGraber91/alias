@@ -65,5 +65,14 @@ export function open(code) {
       window.removeEventListener("storage", onStorage);
       listeners.clear();
     },
+
+    countCreated() {
+      try {
+        const n = Number(localStorage.getItem("alias.stats.created")) || 0;
+        localStorage.setItem("alias.stats.created", String(n + 1));
+      } catch {
+        /* אחסון חסום */
+      }
+    },
   };
 }

@@ -12,7 +12,7 @@ export async function open(code, config) {
     import(`${SDK}/firebase-app.js`),
     import(`${SDK}/firebase-database.js`),
   ]);
-  const { getDatabase, ref, onValue, runTransaction } = db;
+  const { getDatabase, ref, onValue, runTransaction, update, increment } = db;
 
   const database = getDatabase(initializeApp(config));
   const room = ref(database, `rooms/${code}`);
@@ -50,5 +50,8 @@ export async function open(code, config) {
     close() {
       offStop();
     },
+
+    countCreated: () => update(ref(database, "stats"), { created: increment(1) }),
   };
+
 }

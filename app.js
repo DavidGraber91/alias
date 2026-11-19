@@ -242,6 +242,7 @@ async function createRoom(settings) {
     const res = await store.transact((cur) => (cur ? null : initial)); // לא דורסים חדר קיים
     if (res.committed) {
       attach(store, code);
+      store.countCreated?.();
       return true;
     }
     store.close();
