@@ -14,6 +14,7 @@ const $app = document.getElementById("app");
 const $toast = document.getElementById("toast");
 const $net = document.getElementById("net");
 const KEY_SETTINGS = "alias.settings.v1";
+const DENIED_MSG = "Firebase חוסם את החדר. בדקו שפרסמתם את הכללים (Rules ← Publish) ושה-databaseURL נכון.";
 const KEY_LAST_ROOM = "alias.lastRoom.v1"; // ב-sessionStorage: רענון חוזר לחדר, לשונית חדשה לא "חוטפת" חדר של לשונית אחרת
 const KEY_CLIENT = "alias.client.v1"; // ב-sessionStorage: כל לשונית/טלפון הוא "שחקן" נפרד
 
@@ -183,7 +184,7 @@ function peek(store) {
       fn(value);
     };
     const timer = setTimeout(() => finish(reject, new Error("timeout")), CONNECT_TIMEOUT_MS);
-    stop = store.subscribe((state) => finish(resolve, state));
+    stop = store.subscribe((state) => finish(resolve, state), (err) => finish(reject, err));
   });
 }
 
@@ -194,7 +195,7 @@ function attach(store, code) {
   S.room = null;
   S.viewKey = "";
   S.fired = null;
-  S.stopRoom = store.subscribe(onRoom);
+  S.stopRoom = store.subscribe(onRoom, onStoreError);
   S.stopNet = store.onConnection((ok) => {
     $net.textContent = ok ? "" : "אין חיבור. מנסים להתחבר מחדש…";
   });
@@ -229,7 +230,7 @@ async function joinRoom(code) {
   } catch (err) {
     console.error(err);
     store?.close();
-    return { ok: false, reason: "offline" };
+    return { ok: false, reason: err?.message === "permission_denied" ? "denied" : "offline" };
   }
 }
 
@@ -242,12 +243,16 @@ async function createRoom(settings) {
     const res = await store.transact((cur) => (cur ? null : initial)); // לא דורסים חדר קיים
     if (res.committed) {
       attach(store, code);
-      store.countCreated?.();
       return true;
     }
     store.close();
   }
   return false;
+}
+
+function onStoreError(err) {
+  console.error(err);
+  if (err?.message === "permission_denied") toast(DENIED_MSG, 6000);
 }
 
 function leaveRoom() {
@@ -405,6 +410,7 @@ function goHome() {
       </form>
       <button class="btn ghost" data-action="howto">איך משחקים?</button>
       <button class="btn ghost" data-action="share">שתפו את המשחק</button>
+      <a class="link seo-link" href="how-to-play.html">חוקי המשחק המלאים</a>
       ${isOnline ? "" : `<p class="note-local">מצב מקומי: אפשר לבדוק עם כמה לשוניות באותו דפדפן. כדי לשחק בין טלפונים צריך להגדיר Firebase (ראו README).</p>`}
     </div>`,
     "home",
@@ -607,8 +613,13 @@ async function startGame() {
   const s = S.settings;
   if (G.poolFor(S.words, s.levels).length === 0) return;
   save(KEY_SETTINGS, s);
-  const ok = await createRoom(s);
-  if (!ok) toast("לא הצלחנו ליצור חדר. בדקו את החיבור ונסו שוב.", 3200);
+  try {
+    const ok = await createRoom(s);
+    if (!ok) toast("לא הצלחנו ליצור חדר. נסו שוב.", 3200);
+  } catch (err) {
+    console.error(err);
+    toast(err?.message === "permission_denied" ? DENIED_MSG : "לא הצלחנו ליצור חדר. בדקו את החיבור.", 6000);
+  }
 }
 
 /* ───────────── הכנה לתור ───────────── */
@@ -689,7 +700,7 @@ function goPlaying(st) {
       <button class="btn good big" data-action="correct">נכון</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
+        <button class="btn bad" data-action="taboo">אסור<small>${signed(-1)}</small></button>
       </div>
     </div>`,
     "play",
@@ -894,7 +905,7 @@ function badge(entry, game) {
     case "skip":
       return `<span class="badge b-skip">דילוג${s.skip === "penalty" ? ` ${signed(-1)}` : ""}</span>`;
     case "taboo":
-      return `<span class="badge b-taboo">✗ אסור ${signed(-2)}</span>`;
+      return `<span class="badge b-taboo">✗ אסור ${signed(-1)}</span>`;
     case "stolen":
       return `<span class="badge b-stolen">${esc(game.teams[entry.teamId]?.name ?? "")} ${signed(s.stealPoints)}</span>`;
     default:
@@ -1139,7 +1150,7 @@ $app.addEventListener("submit", async (e) => {
   button.disabled = false;
   if (!res.ok) {
     err.innerHTML = `<span role="img" aria-label="שגיאה">⚠️</span> ${
-      res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה. בדקו את הספרות." : "לא הצלחנו להתחבר. בדקו את החיבור ונסו שוב."
+      ({ notfound: "לא נמצא חדר עם הקוד הזה. בדקו את הספרות.", denied: DENIED_MSG })[res.reason] ?? "לא הצלחנו להתחבר. בדקו את החיבור ונסו שוב."
     }`;
     input.focus();
   }
@@ -1254,7 +1265,8 @@ async function init() {
     if (res.ok) return;
     if (res.reason === "notfound") save(KEY_LAST_ROOM, null, "session");
     goHome();
-    if (fromLink !== null) toast(res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה" : "לא הצלחנו להתחבר לחדר", 3200);
+    if (res.reason === "denied") toast(DENIED_MSG, 6000);
+    else if (fromLink !== null) toast(res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה" : "לא הצלחנו להתחבר לחדר", 3200);
     return;
   }
   goHome();
