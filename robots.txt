@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://https://davidgraber91.github.io/alias/sitemap.xml
+Sitemap: https://davidgraber91.github.io/alias/sitemap.xml

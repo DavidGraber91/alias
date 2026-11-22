@@ -700,7 +700,7 @@ function goPlaying(st) {
       <button class="btn good big" data-action="correct">נכון</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-1)}</small></button>
+        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
       </div>
     </div>`,
     "play",
@@ -905,7 +905,7 @@ function badge(entry, game) {
     case "skip":
       return `<span class="badge b-skip">דילוג${s.skip === "penalty" ? ` ${signed(-1)}` : ""}</span>`;
     case "taboo":
-      return `<span class="badge b-taboo">✗ אסור ${signed(-1)}</span>`;
+      return `<span class="badge b-taboo">✗ אסור ${signed(-2)}</span>`;
     case "stolen":
       return `<span class="badge b-stolen">${esc(game.teams[entry.teamId]?.name ?? "")} ${signed(s.stealPoints)}</span>`;
     default:
