@@ -1,24 +1,39 @@
-// app.js — המסכים והחיבור בין המשחק (game.js) לדפדפן.
-// כל מסך הוא פונקציה goXxx() שבונה HTML; לחיצות מטופלות במקום אחד (ACTIONS).
+// app.js — המסכים והחיבור בין המשחק לדפדפן, בגרסת הרב-שחקנים.
+//
+// המצב של המשחק גר בחדר משותף (store.js). כל טלפון מציג אותו לפי התפקיד שלו:
+//   מסביר/ה — הטלפון שלחץ "אני מסביר/ה". רק אצלו מוצגת המילה, ורק הוא מסמן נכון/דלג/אסור.
+//   צופה    — כל שאר הטלפונים. רואים את הטיימר ואת המילים שכבר קיבלו תוצאה, בלי המילה הנוכחית.
+// אין תור קבוע בין הטלפונים: בשלב ההכנה כל טלפון יכול לקחת את התור.
 
 import * as G from "./game.js";
+import * as R from "./room.js";
 import { quip } from "./quips.js";
+import { openStore, isOnline } from "./store.js";
 
 const $app = document.getElementById("app");
+const $toast = document.getElementById("toast");
+const $net = document.getElementById("net");
 const KEY_SETTINGS = "alias.settings.v1";
-const KEY_SAVE = "alias.save.v1";
+const DENIED_MSG = "Firebase חוסם את החדר. בדקו שפרסמתם את הכללים (Rules ← Publish) ושה-databaseURL נכון.";
+const KEY_LAST_ROOM = "alias.lastRoom.v1"; // ב-sessionStorage: רענון חוזר לחדר, לשונית חדשה לא "חוטפת" חדר של לשונית אחרת
+const KEY_CLIENT = "alias.client.v1"; // ב-sessionStorage: כל לשונית/טלפון הוא "שחקן" נפרד
 
 const S = {
   levels: [],
   words: [],
   counts: {},
   settings: null,
-  game: null,
-  phase: "HOME",
-  tick: null, // מזהה ה-interval של הטיימר הפעיל
-  endsAt: 0, // מתי נגמר התור (Date.now)
-  lcEndsAt: 0, // מתי נגמרת ההזדמנות האחרונה
+  clientId: null,
+  store: null, // החדר הפעיל
+  code: null,
+  room: null, // המצב האחרון שהתקבל מהחדר
+  stopRoom: null,
+  stopNet: null,
+  viewKey: "",
+  tick: null,
+  fired: null, // מונע שליחה כפולה של "הזמן נגמר"
   lastSecs: -1,
+  lastEntryCount: 0,
   wake: null,
 };
 
@@ -45,34 +60,51 @@ const vibrate = (pattern) => {
   }
 };
 
-const load = (key) => {
+const load = (key, area = "local") => {
   try {
-    return JSON.parse(localStorage.getItem(key));
+    return JSON.parse((area === "session" ? sessionStorage : localStorage).getItem(key));
   } catch {
     return null;
   }
 };
-const save = (key, value) => {
+const save = (key, value, area = "local") => {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
+    const store = area === "session" ? sessionStorage : localStorage;
+    if (value === null) store.removeItem(key);
+    else store.setItem(key, JSON.stringify(value));
   } catch {
-    /* אחסון חסום — המשחק עדיין עובד, רק בלי המשך אחרי רענון */
+    /* אחסון חסום — המשחק עדיין עובד */
   }
 };
 
-// נשמר רק במעברי מסך שבהם אין טיימר רץ, כדי שרענון באמצע תור יחזיר להכנה לתור
-const persist = () => save(KEY_SAVE, { game: S.game, phase: S.phase });
-
-function toast(message, ms = 2200) {
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = message;
-  document.body.append(el);
-  setTimeout(() => el.remove(), ms);
+function makeClientId() {
+  const existing = load(KEY_CLIENT, "session");
+  if (typeof existing === "string" && existing) return existing;
+  const id = globalThis.crypto?.randomUUID?.() ?? `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  save(KEY_CLIENT, id, "session");
+  return id;
 }
 
-// עקיצה סטלנית מקבוצה נתונה (הרשימות ב-quips.js)
+// הודעה קצרה. אלמנט popover קבוע בדף, כדי שיופיע מעל הכול וקורא מסך יקריא אותו (role="status").
+let toastTimer = 0;
+function toast(message, ms = 2200) {
+  clearTimeout(toastTimer);
+  $toast.textContent = message;
+  try {
+    $toast.showPopover();
+  } catch {
+    /* כבר פתוח, או שהדפדפן לא תומך — ההודעה עדיין מוצגת */
+  }
+  toastTimer = setTimeout(() => {
+    try {
+      $toast.hidePopover();
+    } catch {
+      /* ignore */
+    }
+    $toast.textContent = "";
+  }, ms);
+}
+
 const quipHtml = (kind) => `<p class="quip">${esc(quip(kind))}</p>`;
 
 function show(html, screen) {
@@ -125,10 +157,9 @@ function releaseWakeLock() {
   }
   S.wake = null;
 }
+const timedPhase = () => S.room?.phase === "PLAYING" || S.room?.phase === "LAST_CHANCE";
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && (S.phase === "PLAYING" || S.phase === "LAST_CHANCE")) {
-    acquireWakeLock();
-  }
+  if (document.visibilityState === "visible" && timedPhase()) acquireWakeLock();
 });
 
 function stopTimers() {
@@ -136,26 +167,251 @@ function stopTimers() {
   S.tick = null;
 }
 
+/* ───────────── חדר: חיבור, פעולות, סנכרון ───────────── */
+
+const CONNECT_TIMEOUT_MS = 8000;
+
+// מחכה לערך הראשון מהחדר, בלי להישאר מנוי
+function peek(store) {
+  return new Promise((resolve, reject) => {
+    let stop = null;
+    let done = false;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      queueMicrotask(() => stop?.());
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("timeout")), CONNECT_TIMEOUT_MS);
+    stop = store.subscribe((state) => finish(resolve, state), (err) => finish(reject, err));
+  });
+}
+
+function attach(store, code) {
+  detach();
+  S.store = store;
+  S.code = code;
+  S.room = null;
+  S.viewKey = "";
+  S.fired = null;
+  S.stopRoom = store.subscribe(onRoom, onStoreError);
+  S.stopNet = store.onConnection((ok) => {
+    $net.textContent = ok ? "" : "אין חיבור. מנסים להתחבר מחדש…";
+  });
+  save(KEY_LAST_ROOM, code, "session");
+}
+
+function detach() {
+  stopTimers();
+  releaseWakeLock();
+  S.stopRoom?.();
+  S.stopNet?.();
+  S.store?.close();
+  S.store = S.stopRoom = S.stopNet = null;
+  S.code = null;
+  S.room = null;
+  S.viewKey = "";
+  $net.textContent = "";
+}
+
+/** מצטרף לחדר קיים. מחזיר { ok: true } או { ok: false, reason: "notfound" | "offline" } */
+async function joinRoom(code) {
+  let store;
+  try {
+    store = await openStore(code);
+    const state = await peek(store);
+    if (state === null) {
+      store.close();
+      return { ok: false, reason: "notfound" };
+    }
+    attach(store, code);
+    return { ok: true };
+  } catch (err) {
+    console.error(err);
+    store?.close();
+    return { ok: false, reason: err?.message === "permission_denied" ? "denied" : "offline" };
+  }
+}
+
+/** יוצר חדר חדש מההגדרות ומתחבר אליו */
+async function createRoom(settings) {
+  const initial = R.createRoomState(settings, S.words);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = R.newCode();
+    const store = await openStore(code);
+    const res = await store.transact((cur) => (cur ? null : initial)); // לא דורסים חדר קיים
+    if (res.committed) {
+      attach(store, code);
+      return true;
+    }
+    store.close();
+  }
+  return false;
+}
+
+function onStoreError(err) {
+  console.error(err);
+  if (err?.message === "permission_denied") toast(DENIED_MSG, 6000);
+}
+
+function leaveRoom() {
+  save(KEY_LAST_ROOM, null, "session");
+  detach();
+  goHome();
+}
+
+/** שולח פעולה לחדר. מחזיר true אם התקבלה. */
+async function dispatch(action) {
+  if (!S.store) return false;
+  const full = {
+    ti: S.room?.game.turnIndex,
+    ...action,
+    by: S.clientId,
+    now: S.store.serverNow(),
+  };
+  try {
+    const res = await S.store.transact((cur) => R.reduce(cur, full));
+    return res.committed;
+  } catch (err) {
+    console.error(err);
+    toast("הפעולה לא נשלחה. בדקו את החיבור.");
+    return false;
+  }
+}
+
+function onRoom(state) {
+  if (state === null) {
+    // החדר נמחק מתחת לרגליים שלנו
+    if (S.store) {
+      toast("החדר נסגר");
+      save(KEY_LAST_ROOM, null, "session");
+      detach();
+      goHome();
+    }
+    return;
+  }
+  S.room = state;
+  renderRoom();
+}
+
+/* ───────────── תצוגה לפי מצב החדר ───────────── */
+
+const viewKeyOf = (st, role) => [st.phase, role, st.game.turnIndex, st.game.tiebreak].join("|");
+
+function renderRoom() {
+  const st = S.room;
+  if (!st) return;
+  const role = R.roleOf(st, S.clientId);
+  const key = viewKeyOf(st, role);
+  if (key !== S.viewKey) {
+    S.viewKey = key;
+    enterView(st, role);
+  } else {
+    updateView(st, role);
+  }
+  if (timedPhase()) {
+    if (!S.wake) acquireWakeLock();
+    if (!S.tick) S.tick = setInterval(tickRoom, 100);
+    tickRoom();
+  } else {
+    stopTimers();
+    releaseWakeLock();
+  }
+}
+
+function enterView(st, role) {
+  switch (st.phase) {
+    case "READY":
+      return goReady(st);
+    case "PLAYING":
+      return role === "explainer" ? goPlaying(st) : goWatching(st);
+    case "LAST_CHANCE":
+      return role === "explainer" ? goLastChance(st) : goLastChanceWatching(st);
+    case "SUMMARY":
+      return goSummary(st, role);
+    case "TIEBREAK":
+      return goTiebreak(st);
+    case "GAMEOVER":
+      return goGameOver(st);
+    default:
+      return goHome();
+  }
+}
+
+function updateView(st, role) {
+  if (st.phase === "PLAYING") {
+    if (role === "explainer") refreshWord(st, true);
+    else refreshLog(st);
+  } else if (st.phase === "SUMMARY") {
+    rerenderSummary(st, role);
+  }
+}
+
+/* ───────────── רכיבים משותפים ───────────── */
+
+// פס החדר: הקוד, העתקה, שיתוף ויציאה. הכפתורים מוגדרים בהצהרה (command/commandfor), בלי JS לכל כפתור.
+function roomBar() {
+  return `
+    <div class="roombar">
+      <span class="pill">חדר <span class="num" id="room-code">${esc(S.code)}</span></span>
+      <span class="copy">
+        <button type="button" class="link copy-button" command="--copy" commandfor="room-code">העתקת הקוד</button>
+        <span class="tip" role="status"></span>
+      </span>
+      <button type="button" class="link" data-action="share">שיתוף</button>
+      <button type="button" class="link" command="show-modal" commandfor="leave-dialog">יציאה</button>
+    </div>`;
+}
+
+// מי שהמסביר/ה נעלם/ה (הטלפון כבה, נסגר הדף) יכול לקחת את השליטה
+const takeoverHtml = () => `
+  <details class="help">
+    <summary>הטלפון המסביר/ה לא מגיב?</summary>
+    <p>אפשר לקחת את השליטה בשלב הזה. המסביר/ה הקודם/ת יהפוך/תהפוך לצופה.</p>
+    <button type="button" class="btn" data-action="takeover">אני לוקח/ת את השליטה</button>
+  </details>`;
+
+function entryLines(st, editable) {
+  const g = st.game;
+  const entries = editable ? g.turn.entries : R.resolvedEntries(st);
+  return entries
+    .map((e, i) =>
+      editable
+        ? `<button type="button" class="entry" data-action="cycle" data-value="${i}"><span>${esc(e.word)}</span>${badge(e, g)}</button>`
+        : `<li class="entry"><span>${esc(e.word)}</span>${badge(e, g)}</li>`,
+    )
+    .join("");
+}
+
 /* ───────────── בית ושיתוף ───────────── */
 
 function goHome() {
   stopTimers();
   releaseWakeLock();
-  S.phase = "HOME";
-  const saved = load(KEY_SAVE);
-  const canResume = Boolean(saved?.game?.teams && saved.phase);
+  S.viewKey = "";
   show(
     `
     <div class="hero">
       <h1 class="title-sticker">אליאס</h1>
-      <p class="tagline">מסבירים, מנחשים, זורמים.<br>משחק מילים לקבוצות, על טלפון אחד.</p>
+      <p class="tagline">מסבירים, מנחשים, זורמים.<br>משחק מילים לקבוצות, אפשר גם מכמה טלפונים.</p>
       ${quipHtml("home")}
     </div>
     <div class="stack">
-      ${canResume ? `<button class="btn primary big" data-action="resume">המשך משחק</button>` : ""}
-      <button class="btn ${canResume ? "" : "primary big"}" data-action="new">משחק חדש</button>
+      <button class="btn primary big" data-action="new">משחק חדש</button>
+      <form class="join" data-form="join" aria-labelledby="join-title">
+        <h2 id="join-title">יש לכם קוד משחק?</h2>
+        <div class="join-row">
+          <input class="field num-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{${R.CODE_LENGTH}}" maxlength="${R.CODE_LENGTH}" minlength="${R.CODE_LENGTH}" required autocomplete="off" spellcheck="false" aria-label="קוד משחק, ${R.CODE_LENGTH} ספרות" aria-invalid="false" data-error="join-format-error" placeholder="${"0".repeat(R.CODE_LENGTH)}">
+          <button class="btn" type="submit">הצטרפות</button>
+        </div>
+        <p class="error-msg" id="join-format-error"><span role="img" aria-label="שגיאה">⚠️</span> הקוד הוא ${R.CODE_LENGTH} ספרות.</p>
+        <p class="error-msg shown" id="join-error" role="alert"></p>
+      </form>
       <button class="btn ghost" data-action="howto">איך משחקים?</button>
       <button class="btn ghost" data-action="share">שתפו את המשחק</button>
+      <a class="link seo-link" href="how-to-play.html">חוקי המשחק המלאים</a>
+      ${isOnline ? "" : `<p class="note-local">מצב מקומי: אפשר לבדוק עם כמה לשוניות באותו דפדפן. כדי לשחק בין טלפונים צריך להגדיר Firebase (ראו README).</p>`}
     </div>`,
     "home",
   );
@@ -163,16 +419,18 @@ function goHome() {
 }
 
 function goHowTo() {
-  S.phase = "HOWTO";
+  stopTimers();
+  S.viewKey = "";
   show(
     `
     <header class="topbar"><button class="link" data-action="home">חזרה</button></header>
     <h1 class="page-title">איך משחקים?</h1>
     <section class="panel howto">
       <ul>
-        <li>מחלקים לקבוצות. בכל תור משחקת קבוצה אחת, ושחקן אחד ממנה מחזיק את הטלפון.</li>
-        <li>מי שמחזיק/ה את הטלפון מסביר/ה את המילה שעל המסך בלי להגיד אותה או חלק ממנה.</li>
-        <li>הקבוצה מנחשת. ניחשו? לוחצים "נכון" ומקבלים נקודה. קשה מדי? "דלג". אמרו את המילה עצמה? "אסור", ונקודה יורדת.</li>
+        <li>מחלקים לקבוצות. בכל תור משחקת קבוצה אחת.</li>
+        <li>טלפון אחד יוצר חדר, ושאר הטלפונים מצטרפים עם הקוד. אין חובה שכולם יתחברו: מי שרוצה.</li>
+        <li>בכל תור, מי שרוצה להסביר לוחץ/ת "אני מסביר/ה". רק אצלו/ה מופיעות המילים, ובשאר הטלפונים רואים את הטיימר ואת המילים שכבר נוחשו.</li>
+        <li>המסביר/ה מסביר/ה את המילה בלי להגיד אותה או חלק ממנה. ניחשו? "נכון" ונקודה. קשה מדי? "דלג". אמרו את המילה עצמה? "אסור", ונקודה יורדת.</li>
         <li>כשהזמן נגמר, המילה האחרונה נשארת על המסך וכל הקבוצות יכולות לנחש. מי שניחשה נכון מקבלת נקודה.</li>
         <li>אחרי מספר הסיבובים שבחרתם, הקבוצה עם הכי הרבה נקודות מנצחת. בתיקו בראש יש סיבוב הכרעה.</li>
       </ul>
@@ -182,11 +440,19 @@ function goHowTo() {
   window.scrollTo(0, 0);
 }
 
+function shareUrl() {
+  const url = new URL(location.href);
+  url.hash = "";
+  url.search = "";
+  if (S.code) url.searchParams.set("room", S.code);
+  return url.toString();
+}
+
 async function share() {
-  const url = location.href.split("#")[0];
+  const url = shareUrl();
   try {
     if (navigator.share) {
-      await navigator.share({ title: "אליאס", text: "בואו לשחק אליאס!", url });
+      await navigator.share({ title: "אליאס", text: S.code ? `בואו לשחק אליאס! קוד החדר: ${S.code}` : "בואו לשחק אליאס!", url });
       return;
     }
   } catch (err) {
@@ -196,7 +462,11 @@ async function share() {
     await navigator.clipboard.writeText(url);
     toast("הקישור הועתק");
   } catch {
-    prompt("העתיקו את הקישור:", url);
+    const dialog = document.getElementById("share-dialog");
+    const input = dialog.querySelector("input");
+    input.value = url;
+    dialog.showModal();
+    input.select();
   }
 }
 
@@ -204,7 +474,7 @@ async function share() {
 
 function goSetup() {
   stopTimers();
-  S.phase = "SETUP";
+  S.viewKey = "";
   show(setupHtml(), "setup");
   window.scrollTo(0, 0);
 }
@@ -319,16 +589,16 @@ function setupHtml() {
     <section class="panel">
       <h2>דילוג</h2>
       <div class="chips">
-        ${chip("skip", "penalty", `עם קנס ${signed(-1)}`, s.skip === "penalty")}
-        ${chip("skip", "free", "בלי קנס", s.skip === "free")}
-        ${chip("skip", "off", "אסור לדלג", s.skip === "off")}
+        ${chip("skip-mode", "penalty", `עם קנס ${signed(-1)}`, s.skip === "penalty")}
+        ${chip("skip-mode", "free", "בלי קנס", s.skip === "free")}
+        ${chip("skip-mode", "off", "אסור לדלג", s.skip === "off")}
       </div>
     </section>
 
     <section class="panel">
       <div class="row">
-        <h2>הזדמנות אחרונה</h2>
-        <button type="button" class="switch" role="switch" aria-checked="${s.lastChance}" aria-label="הזדמנות אחרונה" data-action="lc-toggle"></button>
+        <label class="switch-label" for="lc-switch"><h2>הזדמנות אחרונה</h2></label>
+        <input type="checkbox" switch role="switch" class="switch" id="lc-switch" data-switch="lc" ${s.lastChance ? "checked" : ""}>
       </div>
       <p class="sub">כשהזמן נגמר, המילה נשארת על המסך וכל הקבוצות יכולות לנחש.</p>
       ${lastChanceOptions}
@@ -339,22 +609,23 @@ function setupHtml() {
     </div>`;
 }
 
-function startGame() {
+async function startGame() {
   const s = S.settings;
   if (G.poolFor(S.words, s.levels).length === 0) return;
   save(KEY_SETTINGS, s);
-  S.game = G.createGame(s, S.words);
-  goReady();
+  try {
+    const ok = await createRoom(s);
+    if (!ok) toast("לא הצלחנו ליצור חדר. נסו שוב.", 3200);
+  } catch (err) {
+    console.error(err);
+    toast(err?.message === "permission_denied" ? DENIED_MSG : "לא הצלחנו ליצור חדר. בדקו את החיבור.", 6000);
+  }
 }
 
 /* ───────────── הכנה לתור ───────────── */
 
-function goReady() {
-  stopTimers();
-  releaseWakeLock();
-  S.phase = "READY";
-  persist();
-  const g = S.game;
+function goReady(st) {
+  const g = st.game;
   const idx = G.currentTeamIdx(g);
   const round = G.roundInfo(g);
   const roundText = round.tiebreak ? "סיבוב הכרעה" : `סיבוב ${num(round.number)} מתוך ${num(round.total)}`;
@@ -368,10 +639,8 @@ function goReady() {
 
   show(
     `
-    <header class="topbar">
-      <span class="pill">${roundText}</span>
-      <button class="link" data-action="quit">יציאה</button>
-    </header>
+    ${roomBar()}
+    <header class="topbar"><span class="pill">${roundText}</span></header>
     <div class="center">
       <p class="lead">התור של</p>
       <h1 class="team-title">${esc(g.teams[idx].name)}</h1>
@@ -381,26 +650,32 @@ function goReady() {
         ${g.settings.lastChance ? `<span class="pill">הזדמנות אחרונה</span>` : ""}
       </div>
       <div class="score-list">${rows}</div>
-      <p class="lead">בחרו מי מסביר/ה והעבירו אליו/ה את הטלפון.<br>כל השאר לא מציצים!</p>
+      <p class="lead">מי שרוצה להסביר לוחץ/ת על הכפתור.<br>המילים יופיעו רק על הטלפון שלו/ה. כל השאר לא מציצים!</p>
       ${quipHtml("ready")}
     </div>
     <div class="footer">
-      <button class="btn primary big" data-action="begin">מוכן/ה, מתחילים!</button>
+      <button class="btn primary big" data-action="claim">אני מסביר/ה, מתחילים!</button>
     </div>`,
     "ready",
   );
   window.scrollTo(0, 0);
 }
 
-/* ───────────── משחק ───────────── */
+async function claim() {
+  if (S.room?.phase !== "READY") return;
+  ensureAudio();
+  const ok = await dispatch({ type: "claim" });
+  if (!ok) toast("טלפון אחר כבר לקח את התור");
+}
+
+/* ───────────── משחק: המסביר/ה ───────────── */
 
 function wordSize(word) {
   return word.length > 14 ? "w-s" : word.length > 8 ? "w-m" : "w-l";
 }
 
-function goPlaying() {
-  S.phase = "PLAYING";
-  const g = S.game;
+function goPlaying(st) {
+  const g = st.game;
   const team = g.teams[g.turn.teamIdx];
   const skip = g.settings.skip;
   const skipButton =
@@ -431,19 +706,23 @@ function goPlaying() {
     "play",
   );
   window.scrollTo(0, 0);
-  refreshWord(false);
-  startTimer();
+  S.lastSecs = -1;
+  S.lastEntryCount = -1;
+  refreshWord(st, false);
 }
 
-function refreshWord(animate = true) {
-  const g = S.game;
-  const entry = G.currentEntry(g);
+function refreshWord(st, animate) {
+  const entry = G.currentEntry(st.game);
   const word = document.getElementById("word");
   const card = document.getElementById("card");
   if (!entry || !word || !card) return;
+  const count = st.game.turn.entries.length;
+  const changed = count !== S.lastEntryCount;
+  S.lastEntryCount = count;
+  if (!changed) return;
   word.textContent = entry.word;
   word.className = `word ${wordSize(entry.word)}`;
-  const correct = g.turn.entries.filter((e) => e.result === "correct").length;
+  const correct = st.game.turn.entries.filter((e) => e.result === "correct").length;
   const tally = document.getElementById("tally");
   if (tally) tally.innerHTML = `✓ ${num(correct)}`;
   if (animate) {
@@ -455,57 +734,118 @@ function refreshWord(animate = true) {
 }
 
 function answer(result) {
-  if (S.phase !== "PLAYING") return;
-  if (!G.markCurrent(S.game, result)) return;
+  const st = S.room;
+  if (st?.phase !== "PLAYING" || R.roleOf(st, S.clientId) !== "explainer") return;
   vibrate(result === "taboo" ? [30, 40, 30] : 20);
-  refreshWord();
+  dispatch({ type: "answer", result, n: st.game.turn.entries.length });
   // מדי פעם עקיצה קצרה באמצע המשחק, לא על כל מילה ולא כשכבר יש אחת על המסך
-  if (result === "correct" && Math.random() < 0.18 && !document.querySelector(".toast")) toast(quip("play"), 2000);
+  if (result === "correct" && Math.random() < 0.18 && $toast.textContent === "") toast(quip("play"), 2000);
 }
 
-// הטיימר מחשב לפי שעת הסיום ולא לפי ספירה, כדי שכיבוי מסך לא יעצור אותו
-function startTimer() {
-  stopTimers();
-  S.endsAt = Date.now() + S.game.settings.turnSeconds * 1000;
-  S.lastSecs = -1;
-  acquireWakeLock();
-  S.tick = setInterval(tickPlay, 100);
-  tickPlay();
+/* ───────────── משחק: הצופים ───────────── */
+
+function goWatching(st) {
+  const g = st.game;
+  const team = g.teams[g.turn.teamIdx];
+  show(
+    `
+    ${roomBar()}
+    <div class="play-top">
+      <span class="pill">${esc(team.name)}</span>
+      <span class="pill" id="tally"></span>
+    </div>
+    <div class="timer-wrap" id="timer-wrap">
+      <div class="timer" id="timer">${g.settings.turnSeconds}</div>
+      <div class="bar"><i id="bar"></i></div>
+    </div>
+    <p class="lead center-text">טלפון אחר מקריא את המילים. אפשר לנחש בקול!</p>
+    <ol class="entries log" id="log" role="log" aria-label="מילים שכבר נוחשו"></ol>
+    ${takeoverHtml()}`,
+    "watch",
+  );
+  window.scrollTo(0, 0);
+  S.lastEntryCount = -1;
+  refreshLog(st);
 }
 
-function tickPlay() {
-  const left = S.endsAt - Date.now();
-  if (left <= 0) {
-    endPlay();
-    return;
+function refreshLog(st) {
+  const log = document.getElementById("log");
+  if (!log) return;
+  const resolved = R.resolvedEntries(st);
+  if (resolved.length === S.lastEntryCount) return;
+  S.lastEntryCount = resolved.length;
+  const correct = resolved.filter((e) => e.result === "correct").length;
+  const tally = document.getElementById("tally");
+  if (tally) tally.innerHTML = `✓ ${num(correct)}`;
+  // החדשה למעלה, כדי שלא צריך לגלול
+  const g = st.game;
+  log.innerHTML =
+    resolved.length === 0
+      ? `<li class="entry empty">עוד אין מילים</li>`
+      : [...resolved]
+          .reverse()
+          .map((e) => `<li class="entry"><span>${esc(e.word)}</span>${badge(e, g)}</li>`)
+          .join("");
+}
+
+/* ───────────── טיימר (בכל הטלפונים) ───────────── */
+
+// כל טלפון מחשב את הזמן שנשאר מ-endsAt ומשעת השרת, לכן הטיימרים זהים וכיבוי מסך לא עוצר אותם.
+// המסביר/ה סוגר/ת את השלב בזמן. אם הוא/היא נעלמ/ת, טלפון אחר סוגר אחרי זמן חסד.
+function fireOnce(key, action) {
+  if (S.fired === key) return;
+  S.fired = key;
+  dispatch(action).then((ok) => {
+    if (!ok) setTimeout(() => S.fired === key && (S.fired = null), 1000);
+  });
+}
+
+function tickRoom() {
+  const st = S.room;
+  if (!st || !S.store) return stopTimers();
+  const role = R.roleOf(st, S.clientId);
+  const now = S.store.serverNow();
+  const ti = st.game.turnIndex;
+
+  if (st.phase === "PLAYING") {
+    const left = st.endsAt - now;
+    const secs = Math.max(0, Math.ceil(left / 1000));
+    const timer = document.getElementById("timer");
+    const bar = document.getElementById("bar");
+    const wrap = document.getElementById("timer-wrap");
+    if (timer) timer.textContent = secs;
+    if (bar) bar.style.setProperty("--p", Math.max(0, Math.min(1, left / (st.game.settings.turnSeconds * 1000))));
+    if (wrap) wrap.classList.toggle("warn", secs <= 10);
+    if (role === "explainer") {
+      if (secs !== S.lastSecs) {
+        S.lastSecs = secs;
+        if (secs > 0 && secs <= 3) beep(660, 90);
+      }
+      if (left <= 0) {
+        beepEnd();
+        vibrate([250, 100, 250]);
+        fireOnce(`end:${ti}`, { type: "endTurn" });
+      }
+    } else if (left <= -R.GRACE_MS) {
+      fireOnce(`end:${ti}`, { type: "endTurn" });
+    }
+  } else if (st.phase === "LAST_CHANCE" && st.lcEndsAt > 0) {
+    const left = st.lcEndsAt - now;
+    const el = document.getElementById("lc-timer");
+    if (el) el.textContent = Math.max(0, Math.ceil(left / 1000));
+    if (role === "explainer" && left <= 0) {
+      beep(440, 250);
+      fireOnce(`lc:${ti}`, { type: "resolveLast", teamIdx: null });
+    } else if (role !== "explainer" && left <= -R.GRACE_MS) {
+      fireOnce(`lc:${ti}`, { type: "resolveLast", teamIdx: null });
+    }
   }
-  const secs = Math.ceil(left / 1000);
-  const timer = document.getElementById("timer");
-  const bar = document.getElementById("bar");
-  const wrap = document.getElementById("timer-wrap");
-  if (timer) timer.textContent = secs;
-  if (bar) bar.style.width = `${(left / (S.game.settings.turnSeconds * 1000)) * 100}%`;
-  if (wrap) wrap.classList.toggle("warn", secs <= 10);
-  if (secs !== S.lastSecs) {
-    S.lastSecs = secs;
-    if (secs <= 3) beep(660, 90);
-  }
-}
-
-function endPlay() {
-  if (S.phase !== "PLAYING") return;
-  stopTimers();
-  beepEnd();
-  vibrate([250, 100, 250]);
-  if (G.finishTimer(S.game) === "LAST_CHANCE") goLastChance();
-  else goSummary();
 }
 
 /* ───────────── הזדמנות אחרונה ───────────── */
 
-function goLastChance() {
-  S.phase = "LAST_CHANCE";
-  const g = S.game;
+function goLastChance(st) {
+  const g = st.game;
   const entry = G.currentEntry(g);
   const secs = g.settings.lastChanceSeconds;
   const explaining = g.turn.teamIdx;
@@ -529,49 +869,33 @@ function goLastChance() {
     <p class="lead">מי ניחש/ה נכון?</p>
     <div class="stack">
       ${teamButtons}
-      <button class="btn ghost" style="color:inherit;border-color:currentColor" data-action="lc-none">אף אחד לא ניחש</button>
+      <button class="btn ghost on-light" data-action="lc-none">אף אחד לא ניחש</button>
     </div>`,
     "lastchance",
   );
   window.scrollTo(0, 0);
-
-  stopTimers();
-  if (secs > 0) {
-    S.lcEndsAt = Date.now() + secs * 1000;
-    S.tick = setInterval(tickLast, 100);
-    tickLast();
-  }
 }
 
-function tickLast() {
-  const left = S.lcEndsAt - Date.now();
-  if (left <= 0) {
-    beep(440, 250);
-    resolveLast(null);
-    return;
-  }
-  const el = document.getElementById("lc-timer");
-  if (el) el.textContent = Math.ceil(left / 1000);
-}
-
-function resolveLast(teamIdx) {
-  if (S.phase !== "LAST_CHANCE") return;
-  stopTimers();
-  S.game.turn = G.resolveLastChance(S.game.turn, teamIdx);
-  if (teamIdx !== null) vibrate(30);
-  goSummary();
+function goLastChanceWatching(st) {
+  const secs = st.game.settings.lastChanceSeconds;
+  show(
+    `
+    ${roomBar()}
+    <p class="lc-banner">הזמן נגמר!</p>
+    <p class="lc-sub">המילה האחרונה על הטלפון של המסביר/ה. כולם יכולים לנחש.</p>
+    ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
+    ${quipHtml("lastchance")}
+    <ol class="entries log" role="log" aria-label="מילים שכבר נוחשו">${[...R.resolvedEntries(st)]
+      .reverse()
+      .map((e) => `<li class="entry"><span>${esc(e.word)}</span>${badge(e, st.game)}</li>`)
+      .join("")}</ol>
+    ${takeoverHtml()}`,
+    "lastchance",
+  );
+  window.scrollTo(0, 0);
 }
 
 /* ───────────── סיכום תור ───────────── */
-
-function goSummary() {
-  stopTimers();
-  releaseWakeLock();
-  S.phase = "SUMMARY";
-  persist();
-  show(summaryHtml(), "summary");
-  window.scrollTo(0, 0);
-}
 
 function badge(entry, game) {
   const s = game.settings;
@@ -581,7 +905,7 @@ function badge(entry, game) {
     case "skip":
       return `<span class="badge b-skip">דילוג${s.skip === "penalty" ? ` ${signed(-1)}` : ""}</span>`;
     case "taboo":
-      return `<span class="badge b-taboo">אסור ${signed(-1)}</span>`;
+      return `<span class="badge b-taboo">✗ אסור ${signed(-2)}</span>`;
     case "stolen":
       return `<span class="badge b-stolen">${esc(game.teams[entry.teamId]?.name ?? "")} ${signed(s.stealPoints)}</span>`;
     default:
@@ -589,59 +913,61 @@ function badge(entry, game) {
   }
 }
 
-function summaryHtml() {
-  const g = S.game;
+function goSummary(st, role) {
+  show(summaryHtml(st, role), "summary");
+  window.scrollTo(0, 0);
+}
+
+function summaryHtml(st, role) {
+  const g = st.game;
   const turn = g.turn;
+  const editable = role === "explainer";
   const deltas = G.turnDeltas(turn, g.settings, g.teams.length);
-  const rows = turn.entries
-    .map(
-      (e, i) =>
-        `<button class="entry" data-action="cycle" data-value="${i}"><span>${esc(e.word)}</span>${badge(e, g)}</button>`,
-    )
-    .join("");
   const deltaChips = deltas
     .map((d, i) =>
       d === 0 ? "" : `<span class="delta ${d > 0 ? "up" : "down"}">${esc(g.teams[i].name)} ${signed(d)}</span>`,
     )
     .join("");
+  const hasEntries = turn.entries.length > 0;
 
   return `
-    <header class="topbar">
-      <span class="pill">${esc(g.teams[turn.teamIdx].name)}</span>
-      <button class="link" data-action="quit">יציאה</button>
-    </header>
+    ${roomBar()}
+    <header class="topbar"><span class="pill">${esc(g.teams[turn.teamIdx].name)}</span></header>
     <h1 class="page-title">סיכום התור</h1>
     ${
-      turn.entries.length
-        ? `<p class="lead">לחצו על מילה כדי לתקן את התוצאה שלה.</p><div class="entries">${rows}</div>`
+      hasEntries
+        ? `<p class="lead">${editable ? "לחצו על מילה כדי לתקן את התוצאה שלה." : "המסביר/ה בודק/ת את התוצאות ומאשר/ת."}</p>
+           <${editable ? "div" : "ol"} class="entries" id="entries">${entryLines(st, editable)}</${editable ? "div" : "ol"}>`
         : `<p class="lead">לא נאספו מילים בתור הזה.</p>`
     }
-    <div class="deltas">${deltaChips || `<span class="delta">אין שינוי בניקוד</span>`}</div>
+    <div class="deltas" id="deltas">${deltaChips || `<span class="delta">אין שינוי בניקוד</span>`}</div>
     ${quipHtml("summary")}
-    <div class="footer">
-      <button class="btn primary big" data-action="confirm-turn">אישור והמשך</button>
-    </div>`;
+    ${
+      editable
+        ? `<div class="footer"><button class="btn primary big" data-action="confirm-turn">אישור והמשך</button></div>`
+        : takeoverHtml()
+    }`;
 }
 
-function confirmTurn() {
-  if (S.phase !== "SUMMARY") return;
-  G.commitTurn(S.game);
-  const end = G.checkEnd(S.game);
-  if (end === "CONTINUE") goReady();
-  else if (end === "TIEBREAK") goTiebreak();
-  else goGameOver();
+// תיקון תוצאה: בונים מחדש את המסך, ומחזירים את הגלילה והפוקוס לאותה מילה
+function rerenderSummary(st, role) {
+  const y = window.scrollY;
+  const a = document.activeElement;
+  const index = a?.dataset?.action === "cycle" ? a.dataset.value : null;
+  show(summaryHtml(st, role), "summary");
+  window.scrollTo(0, y);
+  if (index !== null) $app.querySelector(`[data-action="cycle"][data-value="${CSS.escape(index)}"]`)?.focus({ preventScroll: true });
 }
 
 /* ───────────── תיקו וסוף משחק ───────────── */
 
-function goTiebreak() {
-  S.phase = "TIEBREAK";
-  persist();
-  const g = S.game;
+function goTiebreak(st) {
+  const g = st.game;
   const leaders = G.leaders(g);
   const names = leaders.map((i) => `<h2 class="team-title sm">${esc(g.teams[i].name)}</h2>`).join("");
   show(
     `
+    ${roomBar()}
     <div class="center grow">
       <h1 class="page-title">תיקו!</h1>
       <p class="lead">הקבוצות האלה מובילות עם ${num(g.teams[leaders[0]].score)} נקודות.<br>כל אחת משחקת עוד תור הכרעה אחד.</p>
@@ -656,12 +982,8 @@ function goTiebreak() {
   window.scrollTo(0, 0);
 }
 
-function goGameOver() {
-  stopTimers();
-  releaseWakeLock();
-  S.phase = "GAMEOVER";
-  save(KEY_SAVE, null);
-  const g = S.game;
+function goGameOver(st) {
+  const g = st.game;
   const winners = G.leaders(g);
   const table = G.standings(g)
     .map(
@@ -680,9 +1002,9 @@ function goGameOver() {
       ${quipHtml("over")}
     </div>
     <div class="stack">
-      <button class="btn primary big" data-action="new">משחק חדש</button>
+      <button class="btn primary big" data-action="new-from-room">משחק חדש</button>
       <button class="btn ghost" data-action="share">שתפו את המשחק</button>
-      <button class="btn ghost" data-action="home">דף הבית</button>
+      <button class="btn ghost" data-action="leave">דף הבית</button>
     </div>`,
     "gameover",
   );
@@ -709,17 +1031,15 @@ function changeRounds(delta) {
 const ACTIONS = {
   // בית
   new: () => goSetup(),
+  "new-from-room"() {
+    save(KEY_LAST_ROOM, null, "session");
+    detach();
+    goSetup();
+  },
   home: () => goHome(),
   howto: () => goHowTo(),
   share: () => share(),
-  resume() {
-    const saved = load(KEY_SAVE);
-    if (!saved?.game?.teams) return goHome();
-    S.game = saved.game;
-    if (saved.phase === "SUMMARY" && S.game.turn) return goSummary();
-    if (saved.phase === "TIEBREAK") return goTiebreak();
-    return goReady();
-  },
+  leave: () => leaveRoom(),
 
   // הגדרות
   "teams-inc": () => changeTeams(1),
@@ -730,14 +1050,8 @@ const ACTIONS = {
     S.settings.turnSeconds = Number(v);
     rerenderSetup();
   },
-  skip(v) {
-    if (S.phase === "SETUP") {
-      S.settings.skip = v;
-      rerenderSetup();
-    } else answer("skip");
-  },
-  "lc-toggle"() {
-    S.settings.lastChance = !S.settings.lastChance;
+  "skip-mode"(v) {
+    S.settings.skip = v;
     rerenderSetup();
   },
   "lc-secs"(v) {
@@ -751,30 +1065,19 @@ const ACTIONS = {
   start: () => startGame(),
 
   // תור
-  quit() {
-    if (confirm("לצאת מהמשחק? אפשר להמשיך אותו מדף הבית.")) goHome();
-  },
-  begin() {
-    if (S.phase !== "READY") return;
-    ensureAudio();
-    G.startTurn(S.game);
-    goPlaying();
-  },
+  claim: () => claim(),
   correct: () => answer("correct"),
+  skip: () => answer("skip"),
   taboo: () => answer("taboo"),
-  "lc-team": (v) => resolveLast(Number(v)),
-  "lc-none": () => resolveLast(null),
-  cycle(v) {
-    S.game.turn = G.cycleEntry(S.game.turn, Number(v), S.game.settings, S.game.teams.length);
-    const y = window.scrollY;
-    show(summaryHtml(), "summary");
-    window.scrollTo(0, y);
-    persist();
-  },
-  "confirm-turn": () => confirmTurn(),
-  "tiebreak-go"() {
-    G.startTiebreak(S.game);
-    goReady();
+  "lc-team": (v) => dispatch({ type: "resolveLast", teamIdx: Number(v) }),
+  "lc-none": () => dispatch({ type: "resolveLast", teamIdx: null }),
+  cycle: (v) => dispatch({ type: "cycle", index: Number(v) }),
+  "confirm-turn": () => dispatch({ type: "confirm" }),
+  "tiebreak-go": () => dispatch({ type: "tiebreakGo" }),
+  async takeover() {
+    ensureAudio();
+    const ok = await dispatch({ type: "takeover" });
+    if (ok) toast("עכשיו אתם המסבירים");
   },
 };
 
@@ -785,6 +1088,12 @@ $app.addEventListener("click", (e) => {
 });
 
 $app.addEventListener("change", (e) => {
+  const sw = e.target.closest("[data-switch]");
+  if (sw) {
+    S.settings.lastChance = sw.checked;
+    rerenderSetup();
+    return;
+  }
   const box = e.target.closest("[data-level]");
   if (!box) return;
   const level = S.levels.find((l) => String(l.id) === box.dataset.level);
@@ -799,7 +1108,118 @@ $app.addEventListener("change", (e) => {
 $app.addEventListener("input", (e) => {
   const input = e.target.closest("[data-team]");
   if (input) S.settings.teams[Number(input.dataset.team)] = input.value;
+  const code = e.target.closest("#join-code");
+  if (code) {
+    code.value = code.value.replace(/\D/g, "").slice(0, R.CODE_LENGTH); // רק ספרות
+    const err = document.getElementById("join-error");
+    if (err) err.textContent = "";
+  }
 });
+
+/* ───────────── הצטרפות עם קוד: ולידציה אחרי אינטראקציה ───────────── */
+
+// :user-invalid מציג שגיאה רק אחרי שהמשתמש סיים להקליד (או ניסה לשלוח). משקפים אותו גם ל-aria-invalid,
+// כדי שקורא מסך יקבל את אותו מצב באותו רגע, ומקשרים את הודעת השגיאה רק כשהיא מוצגת.
+function syncInvalid(el) {
+  const invalid = el.matches(":user-invalid");
+  el.setAttribute("aria-invalid", String(invalid));
+  const errorId = el.dataset.error;
+  if (errorId) {
+    const ids = (el.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== errorId);
+    if (invalid) ids.push(errorId);
+    if (ids.length) el.setAttribute("aria-describedby", ids.join(" "));
+    else el.removeAttribute("aria-describedby");
+  }
+}
+for (const type of ["blur", "change", "input", "invalid"]) {
+  $app.addEventListener(type, (e) => e.target.matches?.("#join-code") && syncInvalid(e.target), true);
+}
+
+$app.addEventListener("submit", async (e) => {
+  const form = e.target.closest("[data-form='join']");
+  if (!form) return;
+  e.preventDefault();
+  const input = form.elements.code;
+  const err = document.getElementById("join-error");
+  syncInvalid(input);
+  if (!input.checkValidity()) return;
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  err.textContent = "";
+  const res = await joinRoom(input.value);
+  button.disabled = false;
+  if (!res.ok) {
+    err.innerHTML = `<span role="img" aria-label="שגיאה">⚠️</span> ${
+      ({ notfound: "לא נמצא חדר עם הקוד הזה. בדקו את הספרות.", denied: DENIED_MSG })[res.reason] ?? "לא הצלחנו להתחבר. בדקו את החיבור ונסו שוב."
+    }`;
+    input.focus();
+  }
+});
+
+/* ───────────── דיאלוגים והעתקה ───────────── */
+
+const leaveDialog = document.getElementById("leave-dialog");
+leaveDialog.addEventListener("close", () => {
+  const choice = leaveDialog.returnValue;
+  leaveDialog.returnValue = ""; // Esc לא מאפס ערך קודם בכל הדפדפנים
+  if (choice === "leave") leaveRoom();
+});
+
+// כפתור "העתקה": הפקודה --copy מוגדרת בהצהרה בכפתור, והבועה שלידו היא גם ה-live region.
+const copyTimers = new WeakMap();
+let lastCopyMessage = "";
+
+function reportCopy(button, ok) {
+  const tip = button.nextElementSibling;
+  clearTimeout(copyTimers.get(button));
+  button.removeAttribute("data-copied");
+  button.removeAttribute("data-failed");
+  let message = ok ? "הועתק" : "ההעתקה נכשלה";
+  if (message === lastCopyMessage) message += " "; // VoiceOver מדלג על הודעה זהה לקודמת
+  lastCopyMessage = message.trim();
+  tip.textContent = "";
+  button.setAttribute(ok ? "data-copied" : "data-failed", "");
+  requestAnimationFrame(() => (tip.textContent = message));
+  copyTimers.set(
+    button,
+    setTimeout(() => {
+      button.removeAttribute("data-copied");
+      button.removeAttribute("data-failed");
+      tip.textContent = "";
+    }, 2000),
+  );
+}
+
+async function copyText(button, target) {
+  const text = target.matches("input, textarea") ? target.value : target.innerText.trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    reportCopy(button, true);
+  } catch {
+    reportCopy(button, false);
+  }
+}
+
+if ("CommandEvent" in window) {
+  // אירועי command לא עושים bubble, ולכן מאזינים בשלב ה-capture. event.source הוא הכפתור.
+  document.addEventListener(
+    "command",
+    (event) => {
+      if (event.command === "--copy") copyText(event.source, event.target);
+    },
+    true,
+  );
+} else {
+  // דפדפן בלי Invoker Commands: אותו סימון, ואותן פעולות דרך click
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("button[command]");
+    const target = button && document.getElementById(button.getAttribute("commandfor"));
+    if (!target) return;
+    if (button.getAttribute("command") === "--copy") copyText(button, target);
+    else if (button.getAttribute("command") === "show-modal") target.showModal();
+  });
+}
 
 /* ───────────── טעינה ───────────── */
 
@@ -822,6 +1242,7 @@ function renderLoadError() {
 }
 
 async function init() {
+  S.clientId = makeClientId();
   try {
     const [levels, words] = await Promise.all([fetchJson("levels.json"), fetchJson("words.json")]);
     S.levels = levels.filter((l) => l && l.id !== undefined && l.name);
@@ -833,6 +1254,21 @@ async function init() {
   }
   S.counts = G.countByLevel(S.words);
   S.settings = G.sanitizeSettings(load(KEY_SETTINGS), usableLevelIds());
+
+  // קישור עם ?room=123456 מצטרף ישר. אחרת חוזרים לחדר האחרון, אם הוא עדיין קיים.
+  const params = new URLSearchParams(location.search);
+  const fromLink = params.get("room");
+  const code = R.isValidCode(fromLink) ? fromLink : load(KEY_LAST_ROOM, "session");
+  if (fromLink !== null) history.replaceState(null, "", location.pathname);
+  if (R.isValidCode(code)) {
+    const res = await joinRoom(code);
+    if (res.ok) return;
+    if (res.reason === "notfound") save(KEY_LAST_ROOM, null, "session");
+    goHome();
+    if (res.reason === "denied") toast(DENIED_MSG, 6000);
+    else if (fromLink !== null) toast(res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה" : "לא הצלחנו להתחבר לחדר", 3200);
+    return;
+  }
   goHome();
 }
 

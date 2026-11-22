@@ -1,15 +1,84 @@
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
+  
+  <meta name="google-site-verification" content="ILooUri6JQFPADMEo8n0Lj_wNRp7-vr6wK2zrbl4tHU"/>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="text-scale" content="scale">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="theme-color" content="#1a0b3d">
-  <meta name="description" content="אליאס: משחק מילים לקבוצות, על טלפון אחד">
-  <title>אליאס</title>
+  <title>אליאס – משחק מילים חינם לקבוצות, אונליין בעברית</title>
+  <meta name="description" content="אליאס: משחק מילים בעברית לקבוצות. מסבירים מילה בלי להגיד אותה והקבוצה מנחשת. משחקים מטלפון אחד או מכמה טלפונים עם קוד משחק, בלי הרשמה.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://davidgraber91.github.io/alias/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="he_IL">
+  <meta property="og:site_name" content="אליאס">
+  <meta property="og:title" content="אליאס – משחק מילים חינם לקבוצות">
+  <meta property="og:description" content="מסבירים, מנחשים, זורמים. משחק מילים בעברית מטלפון אחד או מכמה טלפונים עם קוד משחק.">
+  <meta property="og:url" content="https://davidgraber91.github.io/alias/">
+  <meta property="og:image" content="https://davidgraber91.github.io/alias/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="אליאס – משחק מילים לקבוצות">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="אליאס – משחק מילים חינם לקבוצות">
+  <meta name="twitter:description" content="מסבירים, מנחשים, זורמים. משחק מילים בעברית מטלפון אחד או מכמה טלפונים.">
+  <meta name="twitter:image" content="https://davidgraber91.github.io/alias/og-image.png">
+
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "אליאס",
+    "url": "https://davidgraber91.github.io/alias/",
+    "description": "משחק מילים בעברית לקבוצות: מסבירים מילה בלי להגיד אותה והקבוצה מנחשת. אפשר לשחק מטלפון אחד או מכמה טלפונים עם קוד משחק.",
+    "inLanguage": "he",
+    "applicationCategory": "GameApplication",
+    "operatingSystem": "Any",
+    "browserRequirements": "Requires JavaScript",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "ILS" }
+  }
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <main>
+      <h1>אליאס – משחק מילים לקבוצות</h1>
+      <p>מסבירים מילה בלי להגיד אותה, והקבוצה מנחשת. משחק מילים בעברית מטלפון אחד או מכמה טלפונים עם קוד משחק.</p>
+      <p><a href="how-to-play.html">חוקי המשחק המלאים</a></p>
+    </main>
+  </div>
+  <p id="net" class="net" role="status"></p>
+  <div id="toast" class="toast" popover="manual" role="status"></div>
+
+  <dialog id="leave-dialog" aria-labelledby="leave-title">
+    <h2 id="leave-title">לעזוב את החדר?</h2>
+    <p>המשחק ממשיך אצל האחרים, ואפשר לחזור עם אותו קוד.</p>
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" value="cancel" autofocus>להישאר</button>
+      <button class="btn bad" value="leave">לעזוב</button>
+    </form>
+  </dialog>
+
+  <dialog id="share-dialog" aria-labelledby="share-title" closedby="any">
+    <h2 id="share-title">קישור להצטרפות</h2>
+    <p>העתיקו את הקישור ושלחו אותו.</p>
+    <input class="field" readonly aria-labelledby="share-title" dir="ltr">
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" value="close" autofocus>סגירה</button>
+    </form>
+  </dialog>
+
   <noscript>צריך להפעיל JavaScript כדי לשחק.</noscript>
   <script type="module" src="app.js"></script>
 </body>
