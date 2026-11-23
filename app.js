@@ -4,19 +4,28 @@
 //   מסביר/ה — הטלפון שלחץ "אני מסביר/ה". רק אצלו מוצגת המילה, ורק הוא מסמן נכון/דלג/אסור.
 //   צופה    — כל שאר הטלפונים. רואים את הטיימר ואת המילים שכבר קיבלו תוצאה, בלי המילה הנוכחית.
 // אין תור קבוע בין הטלפונים: בשלב ההכנה כל טלפון יכול לקחת את התור.
+//
+// כל הטקסטים נמצאים ב-strings.js (STR). הקובץ הזה משמש גם את האתר וגם את אפליקציית האנדרואיד.
 
 import * as G from "./game.js";
 import * as R from "./room.js";
 import { quip } from "./quips.js";
 import { openStore, isOnline } from "./store.js";
+import { STR, t as tpl } from "./strings.js";
+import { WEB_URL } from "./app-config.js";
 
 const $app = document.getElementById("app");
 const $toast = document.getElementById("toast");
 const $net = document.getElementById("net");
 const KEY_SETTINGS = "alias.settings.v1";
-const DENIED_MSG = "Firebase חוסם את החדר. בדקו שפרסמתם את הכללים (Rules ← Publish) ושה-databaseURL נכון.";
+const DENIED_MSG = STR.net.denied;
 const KEY_LAST_ROOM = "alias.lastRoom.v1"; // ב-sessionStorage: רענון חוזר לחדר, לשונית חדשה לא "חוטפת" חדר של לשונית אחרת
 const KEY_CLIENT = "alias.client.v1"; // ב-sessionStorage: כל לשונית/טלפון הוא "שחקן" נפרד
+
+// window.AliasNative קיים רק בתוך אפליקציית האנדרואיד (ראו android/.../MainActivity.kt). באתר הוא undefined.
+const native = window.AliasNative ?? null;
+// באתר כל לשונית היא שחקן נפרד, ולכן sessionStorage. באפליקציה יש חלון אחד, ו-localStorage שורד גם סגירה של האפליקציה.
+const ROOM_AREA = native ? "local" : "session";
 
 const S = {
   levels: [],
@@ -45,11 +54,12 @@ const esc = (v) =>
 // מספרים עם סימן נשארים בכיוון קריאה תקין בתוך טקסט עברי
 const num = (t) => `<span class="num">${t}</span>`;
 const signed = (n) => num(n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
-const wordsLabel = (n) => (n === 0 ? "אין מילים" : n === 1 ? "מילה אחת" : `${n} מילים`);
+const wordsLabel = (n) =>
+  n === 0 ? STR.common.wordsNone : n === 1 ? STR.common.wordsOne : tpl(STR.common.words, { n });
 
 function fmtEstimate({ min, max }) {
-  if (min === max) return min === 1 ? "כדקה" : `כ-${num(min)} דקות`;
-  return `כ-${num(`${min}–${max}`)} דקות`;
+  if (min === max) return min === 1 ? STR.common.minutesAboutOne : tpl(STR.common.minutesAbout, { n: num(min) });
+  return tpl(STR.common.minutesAbout, { n: num(`${min}–${max}`) });
 }
 
 const vibrate = (pattern) => {
@@ -78,10 +88,10 @@ const save = (key, value, area = "local") => {
 };
 
 function makeClientId() {
-  const existing = load(KEY_CLIENT, "session");
+  const existing = load(KEY_CLIENT, ROOM_AREA);
   if (typeof existing === "string" && existing) return existing;
   const id = globalThis.crypto?.randomUUID?.() ?? `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-  save(KEY_CLIENT, id, "session");
+  save(KEY_CLIENT, id, ROOM_AREA);
   return id;
 }
 
@@ -143,6 +153,12 @@ function beepEnd() {
 
 async function acquireWakeLock() {
   releaseWakeLock();
+  if (native?.keepScreenOn) {
+    // באפליקציה: דגל "מסך דלוק" של החלון (WebView לא תומך אמין ב-navigator.wakeLock)
+    native.keepScreenOn(true);
+    S.wake = { release: () => native.keepScreenOn(false) };
+    return;
+  }
   try {
     S.wake = (await navigator.wakeLock?.request("screen")) ?? null;
   } catch {
@@ -197,9 +213,9 @@ function attach(store, code) {
   S.fired = null;
   S.stopRoom = store.subscribe(onRoom, onStoreError);
   S.stopNet = store.onConnection((ok) => {
-    $net.textContent = ok ? "" : "אין חיבור. מנסים להתחבר מחדש…";
+    $net.textContent = ok ? "" : STR.net.offline;
   });
-  save(KEY_LAST_ROOM, code, "session");
+  save(KEY_LAST_ROOM, code, ROOM_AREA);
 }
 
 function detach() {
@@ -256,7 +272,7 @@ function onStoreError(err) {
 }
 
 function leaveRoom() {
-  save(KEY_LAST_ROOM, null, "session");
+  save(KEY_LAST_ROOM, null, ROOM_AREA);
   detach();
   goHome();
 }
@@ -275,7 +291,7 @@ async function dispatch(action) {
     return res.committed;
   } catch (err) {
     console.error(err);
-    toast("הפעולה לא נשלחה. בדקו את החיבור.");
+    toast(STR.net.actionFailed);
     return false;
   }
 }
@@ -284,8 +300,8 @@ function onRoom(state) {
   if (state === null) {
     // החדר נמחק מתחת לרגליים שלנו
     if (S.store) {
-      toast("החדר נסגר");
-      save(KEY_LAST_ROOM, null, "session");
+      toast(STR.net.roomClosed);
+      save(KEY_LAST_ROOM, null, ROOM_AREA);
       detach();
       goHome();
     }
@@ -354,22 +370,22 @@ function updateView(st, role) {
 function roomBar() {
   return `
     <div class="roombar">
-      <span class="pill">חדר <span class="num" id="room-code">${esc(S.code)}</span></span>
+      <span class="pill">${STR.roomBar.room} <span class="num" id="room-code">${esc(S.code)}</span></span>
       <span class="copy">
-        <button type="button" class="link copy-button" command="--copy" commandfor="room-code">העתקת הקוד</button>
+        <button type="button" class="link copy-button" command="--copy" commandfor="room-code">${STR.roomBar.copyCode}</button>
         <span class="tip" role="status"></span>
       </span>
-      <button type="button" class="link" data-action="share">שיתוף</button>
-      <button type="button" class="link" command="show-modal" commandfor="leave-dialog">יציאה</button>
+      <button type="button" class="link" data-action="share">${STR.roomBar.share}</button>
+      <button type="button" class="link" command="show-modal" commandfor="leave-dialog">${STR.roomBar.leave}</button>
     </div>`;
 }
 
 // מי שהמסביר/ה נעלם/ה (הטלפון כבה, נסגר הדף) יכול לקחת את השליטה
 const takeoverHtml = () => `
   <details class="help">
-    <summary>הטלפון המסביר/ה לא מגיב?</summary>
-    <p>אפשר לקחת את השליטה בשלב הזה. המסביר/ה הקודם/ת יהפוך/תהפוך לצופה.</p>
-    <button type="button" class="btn" data-action="takeover">אני לוקח/ת את השליטה</button>
+    <summary>${STR.takeover.summary}</summary>
+    <p>${STR.takeover.text}</p>
+    <button type="button" class="btn" data-action="takeover">${STR.takeover.button}</button>
   </details>`;
 
 function entryLines(st, editable) {
@@ -393,25 +409,25 @@ function goHome() {
   show(
     `
     <div class="hero">
-      <h1 class="title-sticker">אליאס</h1>
-      <p class="tagline">מסבירים, מנחשים, זורמים.<br>משחק מילים לקבוצות, אפשר גם מכמה טלפונים.</p>
+      <h1 class="title-sticker">${STR.home.title}</h1>
+      <p class="tagline">${STR.home.tagline.join("<br>")}</p>
       ${quipHtml("home")}
     </div>
     <div class="stack">
-      <button class="btn primary big" data-action="new">משחק חדש</button>
+      <button class="btn primary big" data-action="new">${STR.home.newGame}</button>
       <form class="join" data-form="join" aria-labelledby="join-title">
-        <h2 id="join-title">יש לכם קוד משחק?</h2>
+        <h2 id="join-title">${STR.home.joinTitle}</h2>
         <div class="join-row">
-          <input class="field num-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{${R.CODE_LENGTH}}" maxlength="${R.CODE_LENGTH}" minlength="${R.CODE_LENGTH}" required autocomplete="off" spellcheck="false" aria-label="קוד משחק, ${R.CODE_LENGTH} ספרות" aria-invalid="false" data-error="join-format-error" placeholder="${"0".repeat(R.CODE_LENGTH)}">
-          <button class="btn" type="submit">הצטרפות</button>
+          <input class="field num-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{${R.CODE_LENGTH}}" maxlength="${R.CODE_LENGTH}" minlength="${R.CODE_LENGTH}" required autocomplete="off" spellcheck="false" aria-label="${tpl(STR.home.joinAria, { n: R.CODE_LENGTH })}" aria-invalid="false" data-error="join-format-error" placeholder="${"0".repeat(R.CODE_LENGTH)}">
+          <button class="btn" type="submit">${STR.home.joinButton}</button>
         </div>
-        <p class="error-msg" id="join-format-error"><span role="img" aria-label="שגיאה">⚠️</span> הקוד הוא ${R.CODE_LENGTH} ספרות.</p>
+        <p class="error-msg" id="join-format-error"><span role="img" aria-label="${STR.common.error}">⚠️</span> ${tpl(STR.home.joinFormatError, { n: R.CODE_LENGTH })}</p>
         <p class="error-msg shown" id="join-error" role="alert"></p>
       </form>
-      <button class="btn ghost" data-action="howto">איך משחקים?</button>
-      <button class="btn ghost" data-action="share">שתפו את המשחק</button>
-      <a class="link seo-link" href="how-to-play.html">חוקי המשחק המלאים</a>
-      ${isOnline ? "" : `<p class="note-local">מצב מקומי: אפשר לבדוק עם כמה לשוניות באותו דפדפן. כדי לשחק בין טלפונים צריך להגדיר Firebase (ראו README).</p>`}
+      <button class="btn ghost" data-action="howto">${STR.home.howTo}</button>
+      <button class="btn ghost" data-action="share">${STR.home.shareGame}</button>
+      ${native ? "" : `<a class="link seo-link" href="how-to-play.html">${STR.home.fullRules}</a>`}
+      ${isOnline ? "" : `<p class="note-local">${STR.home.localNote}</p>`}
     </div>`,
     "home",
   );
@@ -423,17 +439,10 @@ function goHowTo() {
   S.viewKey = "";
   show(
     `
-    <header class="topbar"><button class="link" data-action="home">חזרה</button></header>
-    <h1 class="page-title">איך משחקים?</h1>
+    <header class="topbar"><button class="link" data-action="home">${STR.common.back}</button></header>
+    <h1 class="page-title">${STR.howTo.title}</h1>
     <section class="panel howto">
-      <ul>
-        <li>מחלקים לקבוצות. בכל תור משחקת קבוצה אחת.</li>
-        <li>טלפון אחד יוצר חדר, ושאר הטלפונים מצטרפים עם הקוד. אין חובה שכולם יתחברו: מי שרוצה.</li>
-        <li>בכל תור, מי שרוצה להסביר לוחץ/ת "אני מסביר/ה". רק אצלו/ה מופיעות המילים, ובשאר הטלפונים רואים את הטיימר ואת המילים שכבר נוחשו.</li>
-        <li>המסביר/ה מסביר/ה את המילה בלי להגיד אותה או חלק ממנה. ניחשו? "נכון" ונקודה. קשה מדי? "דלג". אמרו את המילה עצמה? "אסור", ונקודה יורדת.</li>
-        <li>כשהזמן נגמר, המילה האחרונה נשארת על המסך וכל הקבוצות יכולות לנחש. מי שניחשה נכון מקבלת נקודה.</li>
-        <li>אחרי מספר הסיבובים שבחרתם, הקבוצה עם הכי הרבה נקודות מנצחת. בתיקו בראש יש סיבוב הכרעה.</li>
-      </ul>
+      <ul>${STR.howTo.items.map((item) => `<li>${item}</li>`).join("")}</ul>
     </section>`,
     "howto",
   );
@@ -441,7 +450,10 @@ function goHowTo() {
 }
 
 function shareUrl() {
-  const url = new URL(location.href);
+  // לאפליקציה אין כתובת ציבורית משלה, ולכן משתפים את כתובת האתר (WEB_URL ב-app-config.js). בלי כתובת משתפים רק טקסט.
+  const base = native ? WEB_URL : location.href;
+  if (!base) return "";
+  const url = new URL(base);
   url.hash = "";
   url.search = "";
   if (S.code) url.searchParams.set("room", S.code);
@@ -450,9 +462,14 @@ function shareUrl() {
 
 async function share() {
   const url = shareUrl();
+  const text = S.code ? tpl(STR.share.textWithCode, { code: S.code }) : STR.share.text;
+  if (native?.share) {
+    native.share(text, url); // חלון השיתוף של אנדרואיד
+    return;
+  }
   try {
     if (navigator.share) {
-      await navigator.share({ title: "אליאס", text: S.code ? `בואו לשחק אליאס! קוד החדר: ${S.code}` : "בואו לשחק אליאס!", url });
+      await navigator.share({ title: STR.share.title, text, url });
       return;
     }
   } catch (err) {
@@ -460,7 +477,7 @@ async function share() {
   }
   try {
     await navigator.clipboard.writeText(url);
-    toast("הקישור הועתק");
+    toast(STR.share.copied);
   } catch {
     const dialog = document.getElementById("share-dialog");
     const input = dialog.querySelector("input");
@@ -509,15 +526,15 @@ function setupHtml() {
 
   const stepper = (name, value, min, max) => `
     <div class="stepper">
-      <button type="button" class="step" data-action="${name}-dec" aria-label="פחות" ${value <= min ? "disabled" : ""}>−</button>
+      <button type="button" class="step" data-action="${name}-dec" aria-label="${STR.common.less}" ${value <= min ? "disabled" : ""}>−</button>
       <output>${value}</output>
-      <button type="button" class="step" data-action="${name}-inc" aria-label="יותר" ${value >= max ? "disabled" : ""}>+</button>
+      <button type="button" class="step" data-action="${name}-inc" aria-label="${STR.common.more}" ${value >= max ? "disabled" : ""}>+</button>
     </div>`;
 
   const teamFields = s.teams
     .map(
       (name, i) =>
-        `<input class="field" data-team="${i}" value="${esc(name)}" maxlength="20" placeholder="${esc(G.defaultTeamName(i))}" aria-label="שם קבוצה ${i + 1}" autocomplete="off">`,
+        `<input class="field" data-team="${i}" value="${esc(name)}" maxlength="20" placeholder="${esc(G.defaultTeamName(i))}" aria-label="${tpl(STR.setup.teamAria, { n: i + 1 })}" autocomplete="off">`,
     )
     .join("");
 
@@ -537,75 +554,75 @@ function setupHtml() {
     .join("");
 
   const poolNote = canStart
-    ? `<p class="note">נבחרו ${wordsLabel(pool)}</p>`
-    : `<p class="note">בחרו לפחות רמה אחת.</p>`;
+    ? `<p class="note">${tpl(STR.setup.poolSelected, { words: wordsLabel(pool) })}</p>`
+    : `<p class="note">${STR.setup.poolNone}</p>`;
   const poolWarning =
     canStart && pool < needed
-      ? `<p class="warning">ברמות שנבחרו יש ${wordsLabel(pool)}, והמשחק עשוי להזדקק לכ-${num(needed)}. חלק מהמילים יחזרו.</p>`
+      ? `<p class="warning">${tpl(STR.setup.poolWarning, { pool: wordsLabel(pool), needed: num(needed) })}</p>`
       : "";
 
   const lastChanceOptions = s.lastChance
     ? `
-      <p class="sub">כמה זמן אפשר לנחש אחרי שהזמן נגמר</p>
+      <p class="sub">${STR.setup.lastChanceSeconds}</p>
       <div class="chips">${G.LAST_CHANCE_OPTIONS.map((v) =>
-        chip("lc-secs", v, v === 0 ? "עד לחיצה" : `${num(v)} שניות`, s.lastChanceSeconds === v),
+        chip("lc-secs", v, v === 0 ? STR.setup.untilTap : tpl(STR.common.seconds, { n: num(v) }), s.lastChanceSeconds === v),
       ).join("")}</div>
-      <p class="sub">נקודות לקבוצה אחרת שניחשה. הקבוצה המסבירה מקבלת תמיד ${signed(1)}.</p>
+      <p class="sub">${tpl(STR.setup.stealPoints, { delta: signed(1) })}</p>
       <div class="chips">${[1, 2].map((v) => chip("steal", v, signed(v), s.stealPoints === v)).join("")}</div>`
     : "";
 
   return `
-    <header class="topbar"><button class="link" data-action="home">חזרה</button></header>
-    <h1 class="page-title">הגדרות משחק</h1>
+    <header class="topbar"><button class="link" data-action="home">${STR.common.back}</button></header>
+    <h1 class="page-title">${STR.setup.title}</h1>
 
     <section class="panel">
-      <h2>קבוצות</h2>
-      <div class="row"><span>כמה קבוצות</span>${stepper("teams", s.teams.length, G.LIMITS.minTeams, G.LIMITS.maxTeams)}</div>
+      <h2>${STR.setup.teams}</h2>
+      <div class="row"><span>${STR.setup.teamsCount}</span>${stepper("teams", s.teams.length, G.LIMITS.minTeams, G.LIMITS.maxTeams)}</div>
       ${teamFields}
     </section>
 
     <section class="panel">
-      <h2>סיבובים</h2>
-      <div class="row"><span>בכל סיבוב כל קבוצה משחקת תור</span>${stepper("rounds", s.rounds, G.LIMITS.minRounds, G.LIMITS.maxRounds)}</div>
-      <div class="estimate"><span>זמן משחק משוער</span><b>${fmtEstimate(est)}</b></div>
-      <p class="sub">${num(G.totalTurns(s))} תורות בסך הכול</p>
+      <h2>${STR.setup.rounds}</h2>
+      <div class="row"><span>${STR.setup.roundsRow}</span>${stepper("rounds", s.rounds, G.LIMITS.minRounds, G.LIMITS.maxRounds)}</div>
+      <div class="estimate"><span>${STR.setup.estimate}</span><b>${fmtEstimate(est)}</b></div>
+      <p class="sub">${tpl(STR.setup.turnsTotal, { n: num(G.totalTurns(s)) })}</p>
     </section>
 
     <section class="panel">
-      <h2>זמן לתור</h2>
+      <h2>${STR.setup.turnTime}</h2>
       <div class="chips">${G.TURN_SECONDS_OPTIONS.map((v) =>
-        chip("turn-secs", v, `${num(v)} שניות`, s.turnSeconds === v),
+        chip("turn-secs", v, tpl(STR.common.seconds, { n: num(v) }), s.turnSeconds === v),
       ).join("")}</div>
     </section>
 
     <section class="panel">
-      <h2>רמות</h2>
-      <p class="sub">אפשר לבחור כמה רמות. המילים מתערבבות ביניהן.</p>
+      <h2>${STR.setup.levels}</h2>
+      <p class="sub">${STR.setup.levelsHint}</p>
       <div class="levels">${levelCards}</div>
       ${poolNote}
       ${poolWarning}
     </section>
 
     <section class="panel">
-      <h2>דילוג</h2>
+      <h2>${STR.setup.skip}</h2>
       <div class="chips">
-        ${chip("skip-mode", "penalty", `עם קנס ${signed(-1)}`, s.skip === "penalty")}
-        ${chip("skip-mode", "free", "בלי קנס", s.skip === "free")}
-        ${chip("skip-mode", "off", "אסור לדלג", s.skip === "off")}
+        ${chip("skip-mode", "penalty", tpl(STR.setup.skipPenalty, { delta: signed(-1) }), s.skip === "penalty")}
+        ${chip("skip-mode", "free", STR.setup.skipFree, s.skip === "free")}
+        ${chip("skip-mode", "off", STR.setup.skipOff, s.skip === "off")}
       </div>
     </section>
 
     <section class="panel">
       <div class="row">
-        <label class="switch-label" for="lc-switch"><h2>הזדמנות אחרונה</h2></label>
+        <label class="switch-label" for="lc-switch"><h2>${STR.setup.lastChance}</h2></label>
         <input type="checkbox" switch role="switch" class="switch" id="lc-switch" data-switch="lc" ${s.lastChance ? "checked" : ""}>
       </div>
-      <p class="sub">כשהזמן נגמר, המילה נשארת על המסך וכל הקבוצות יכולות לנחש.</p>
+      <p class="sub">${STR.setup.lastChanceHint}</p>
       ${lastChanceOptions}
     </section>
 
     <div class="footer">
-      <button class="btn primary big" data-action="start" ${canStart ? "" : "disabled"}>מתחילים!</button>
+      <button class="btn primary big" data-action="start" ${canStart ? "" : "disabled"}>${STR.setup.start}</button>
     </div>`;
 }
 
@@ -615,10 +632,10 @@ async function startGame() {
   save(KEY_SETTINGS, s);
   try {
     const ok = await createRoom(s);
-    if (!ok) toast("לא הצלחנו ליצור חדר. נסו שוב.", 3200);
+    if (!ok) toast(STR.net.createFailed, 3200);
   } catch (err) {
     console.error(err);
-    toast(err?.message === "permission_denied" ? DENIED_MSG : "לא הצלחנו ליצור חדר. בדקו את החיבור.", 6000);
+    toast(err?.message === "permission_denied" ? DENIED_MSG : STR.net.createFailedOffline, 6000);
   }
 }
 
@@ -628,8 +645,10 @@ function goReady(st) {
   const g = st.game;
   const idx = G.currentTeamIdx(g);
   const round = G.roundInfo(g);
-  const roundText = round.tiebreak ? "סיבוב הכרעה" : `סיבוב ${num(round.number)} מתוך ${num(round.total)}`;
-  const skipText = { penalty: "דילוג עם קנס", free: "דילוג בלי קנס", off: "בלי דילוג" }[g.settings.skip];
+  const roundText = round.tiebreak
+    ? STR.ready.tiebreakRound
+    : tpl(STR.ready.round, { n: num(round.number), total: num(round.total) });
+  const skipText = { penalty: STR.ready.skipPenalty, free: STR.ready.skipFree, off: STR.ready.skipOff }[g.settings.skip];
   const rows = g.teams
     .map(
       (t, i) =>
@@ -642,19 +661,19 @@ function goReady(st) {
     ${roomBar()}
     <header class="topbar"><span class="pill">${roundText}</span></header>
     <div class="center">
-      <p class="lead">התור של</p>
+      <p class="lead">${STR.ready.turnOf}</p>
       <h1 class="team-title">${esc(g.teams[idx].name)}</h1>
       <div class="pills">
-        <span class="pill">${num(g.settings.turnSeconds)} שניות</span>
+        <span class="pill">${tpl(STR.common.seconds, { n: num(g.settings.turnSeconds) })}</span>
         <span class="pill">${skipText}</span>
-        ${g.settings.lastChance ? `<span class="pill">הזדמנות אחרונה</span>` : ""}
+        ${g.settings.lastChance ? `<span class="pill">${STR.ready.lastChancePill}</span>` : ""}
       </div>
       <div class="score-list">${rows}</div>
-      <p class="lead">מי שרוצה להסביר לוחץ/ת על הכפתור.<br>המילים יופיעו רק על הטלפון שלו/ה. כל השאר לא מציצים!</p>
+      <p class="lead">${STR.ready.lead.join("<br>")}</p>
       ${quipHtml("ready")}
     </div>
     <div class="footer">
-      <button class="btn primary big" data-action="claim">אני מסביר/ה, מתחילים!</button>
+      <button class="btn primary big" data-action="claim">${STR.ready.claim}</button>
     </div>`,
     "ready",
   );
@@ -665,7 +684,7 @@ async function claim() {
   if (S.room?.phase !== "READY") return;
   ensureAudio();
   const ok = await dispatch({ type: "claim" });
-  if (!ok) toast("טלפון אחר כבר לקח את התור");
+  if (!ok) toast(STR.net.alreadyClaimed);
 }
 
 /* ───────────── משחק: המסביר/ה ───────────── */
@@ -681,7 +700,7 @@ function goPlaying(st) {
   const skipButton =
     skip === "off"
       ? ""
-      : `<button class="btn" data-action="skip">דלג${skip === "penalty" ? `<small>${signed(-1)}</small>` : ""}</button>`;
+      : `<button class="btn" data-action="skip">${STR.play.skip}${skip === "penalty" ? `<small>${signed(-1)}</small>` : ""}</button>`;
 
   show(
     `
@@ -697,10 +716,10 @@ function goPlaying(st) {
       <div class="word-card" id="card"><div class="word" id="word"></div></div>
     </div>
     <div class="actions">
-      <button class="btn good big" data-action="correct">נכון</button>
+      <button class="btn good big" data-action="correct">${STR.play.correct}</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
+        <button class="btn bad" data-action="taboo">${STR.play.taboo}<small>${signed(-2)}</small></button>
       </div>
     </div>`,
     "play",
@@ -758,8 +777,8 @@ function goWatching(st) {
       <div class="timer" id="timer">${g.settings.turnSeconds}</div>
       <div class="bar"><i id="bar"></i></div>
     </div>
-    <p class="lead center-text">טלפון אחר מקריא את המילים. אפשר לנחש בקול!</p>
-    <ol class="entries log" id="log" role="log" aria-label="מילים שכבר נוחשו"></ol>
+    <p class="lead center-text">${STR.play.watching}</p>
+    <ol class="entries log" id="log" role="log" aria-label="${STR.play.logAria}"></ol>
     ${takeoverHtml()}`,
     "watch",
   );
@@ -781,7 +800,7 @@ function refreshLog(st) {
   const g = st.game;
   log.innerHTML =
     resolved.length === 0
-      ? `<li class="entry empty">עוד אין מילים</li>`
+      ? `<li class="entry empty">${STR.play.logEmpty}</li>`
       : [...resolved]
           .reverse()
           .map((e) => `<li class="entry"><span>${esc(e.word)}</span>${badge(e, g)}</li>`)
@@ -853,7 +872,7 @@ function goLastChance(st) {
     .map(
       (t, i) => `
       <button class="btn team-btn" data-action="lc-team" data-value="${i}">
-        <span>✓ ${esc(t.name)}${i === explaining ? `<small>הקבוצה המסבירה</small>` : ""}</span>
+        <span>✓ ${esc(t.name)}${i === explaining ? `<small>${STR.lastChance.explainingTeam}</small>` : ""}</span>
         ${signed(i === explaining ? 1 : g.settings.stealPoints)}
       </button>`,
     )
@@ -861,15 +880,15 @@ function goLastChance(st) {
 
   show(
     `
-    <p class="lc-banner">הזמן נגמר!</p>
-    <p class="lc-sub">כולם יכולים לנחש, גם הקבוצה המסבירה.</p>
+    <p class="lc-banner">${STR.lastChance.banner}</p>
+    <p class="lc-sub">${STR.lastChance.sub}</p>
     ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
     <div class="word-card" id="card"><div class="word ${wordSize(entry.word)}">${esc(entry.word)}</div></div>
     ${quipHtml("lastchance")}
-    <p class="lead">מי ניחש/ה נכון?</p>
+    <p class="lead">${STR.lastChance.question}</p>
     <div class="stack">
       ${teamButtons}
-      <button class="btn ghost on-light" data-action="lc-none">אף אחד לא ניחש</button>
+      <button class="btn ghost on-light" data-action="lc-none">${STR.lastChance.nobody}</button>
     </div>`,
     "lastchance",
   );
@@ -881,11 +900,11 @@ function goLastChanceWatching(st) {
   show(
     `
     ${roomBar()}
-    <p class="lc-banner">הזמן נגמר!</p>
-    <p class="lc-sub">המילה האחרונה על הטלפון של המסביר/ה. כולם יכולים לנחש.</p>
+    <p class="lc-banner">${STR.lastChance.banner}</p>
+    <p class="lc-sub">${STR.lastChance.watchSub}</p>
     ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
     ${quipHtml("lastchance")}
-    <ol class="entries log" role="log" aria-label="מילים שכבר נוחשו">${[...R.resolvedEntries(st)]
+    <ol class="entries log" role="log" aria-label="${STR.play.logAria}">${[...R.resolvedEntries(st)]
       .reverse()
       .map((e) => `<li class="entry"><span>${esc(e.word)}</span>${badge(e, st.game)}</li>`)
       .join("")}</ol>
@@ -901,15 +920,15 @@ function badge(entry, game) {
   const s = game.settings;
   switch (entry.result) {
     case "correct":
-      return `<span class="badge b-correct">✓ נכון ${signed(1)}</span>`;
+      return `<span class="badge b-correct">${tpl(STR.badges.correct, { delta: signed(1) })}</span>`;
     case "skip":
-      return `<span class="badge b-skip">דילוג${s.skip === "penalty" ? ` ${signed(-1)}` : ""}</span>`;
+      return `<span class="badge b-skip">${s.skip === "penalty" ? tpl(STR.badges.skipPenalty, { delta: signed(-1) }) : STR.badges.skip}</span>`;
     case "taboo":
-      return `<span class="badge b-taboo">✗ אסור ${signed(-2)}</span>`;
+      return `<span class="badge b-taboo">${tpl(STR.badges.taboo, { delta: signed(-2) })}</span>`;
     case "stolen":
-      return `<span class="badge b-stolen">${esc(game.teams[entry.teamId]?.name ?? "")} ${signed(s.stealPoints)}</span>`;
+      return `<span class="badge b-stolen">${tpl(STR.badges.stolen, { team: esc(game.teams[entry.teamId]?.name ?? ""), delta: signed(s.stealPoints) })}</span>`;
     default:
-      return `<span class="badge b-missed">לא נוחשה</span>`;
+      return `<span class="badge b-missed">${STR.badges.missed}</span>`;
   }
 }
 
@@ -933,18 +952,18 @@ function summaryHtml(st, role) {
   return `
     ${roomBar()}
     <header class="topbar"><span class="pill">${esc(g.teams[turn.teamIdx].name)}</span></header>
-    <h1 class="page-title">סיכום התור</h1>
+    <h1 class="page-title">${STR.summary.title}</h1>
     ${
       hasEntries
-        ? `<p class="lead">${editable ? "לחצו על מילה כדי לתקן את התוצאה שלה." : "המסביר/ה בודק/ת את התוצאות ומאשר/ת."}</p>
+        ? `<p class="lead">${editable ? STR.summary.leadEditable : STR.summary.leadViewer}</p>
            <${editable ? "div" : "ol"} class="entries" id="entries">${entryLines(st, editable)}</${editable ? "div" : "ol"}>`
-        : `<p class="lead">לא נאספו מילים בתור הזה.</p>`
+        : `<p class="lead">${STR.summary.empty}</p>`
     }
-    <div class="deltas" id="deltas">${deltaChips || `<span class="delta">אין שינוי בניקוד</span>`}</div>
+    <div class="deltas" id="deltas">${deltaChips || `<span class="delta">${STR.summary.noChange}</span>`}</div>
     ${quipHtml("summary")}
     ${
       editable
-        ? `<div class="footer"><button class="btn primary big" data-action="confirm-turn">אישור והמשך</button></div>`
+        ? `<div class="footer"><button class="btn primary big" data-action="confirm-turn">${STR.summary.confirm}</button></div>`
         : takeoverHtml()
     }`;
 }
@@ -969,13 +988,13 @@ function goTiebreak(st) {
     `
     ${roomBar()}
     <div class="center grow">
-      <h1 class="page-title">תיקו!</h1>
-      <p class="lead">הקבוצות האלה מובילות עם ${num(g.teams[leaders[0]].score)} נקודות.<br>כל אחת משחקת עוד תור הכרעה אחד.</p>
+      <h1 class="page-title">${STR.tiebreak.title}</h1>
+      <p class="lead">${tpl(STR.tiebreak.lead.join("<br>"), { score: num(g.teams[leaders[0]].score) })}</p>
       ${names}
       ${quipHtml("tiebreak")}
     </div>
     <div class="footer">
-      <button class="btn primary big" data-action="tiebreak-go">לסיבוב ההכרעה</button>
+      <button class="btn primary big" data-action="tiebreak-go">${STR.tiebreak.go}</button>
     </div>`,
     "tiebreak",
   );
@@ -996,15 +1015,15 @@ function goGameOver(st) {
   show(
     `
     <div class="center grow">
-      <p class="lead">${winners.length === 1 ? "הקבוצה המנצחת" : "תיקו בין הקבוצות"}</p>
+      <p class="lead">${winners.length === 1 ? STR.gameOver.winner : STR.gameOver.tie}</p>
       ${headline}
       <div class="score-list">${table}</div>
       ${quipHtml("over")}
     </div>
     <div class="stack">
-      <button class="btn primary big" data-action="new-from-room">משחק חדש</button>
-      <button class="btn ghost" data-action="share">שתפו את המשחק</button>
-      <button class="btn ghost" data-action="leave">דף הבית</button>
+      <button class="btn primary big" data-action="new-from-room">${STR.gameOver.newGame}</button>
+      <button class="btn ghost" data-action="share">${STR.gameOver.share}</button>
+      <button class="btn ghost" data-action="leave">${STR.gameOver.home}</button>
     </div>`,
     "gameover",
   );
@@ -1032,7 +1051,7 @@ const ACTIONS = {
   // בית
   new: () => goSetup(),
   "new-from-room"() {
-    save(KEY_LAST_ROOM, null, "session");
+    save(KEY_LAST_ROOM, null, ROOM_AREA);
     detach();
     goSetup();
   },
@@ -1077,7 +1096,7 @@ const ACTIONS = {
   async takeover() {
     ensureAudio();
     const ok = await dispatch({ type: "takeover" });
-    if (ok) toast("עכשיו אתם המסבירים");
+    if (ok) toast(STR.net.nowExplaining);
   },
 };
 
@@ -1149,8 +1168,8 @@ $app.addEventListener("submit", async (e) => {
   const res = await joinRoom(input.value);
   button.disabled = false;
   if (!res.ok) {
-    err.innerHTML = `<span role="img" aria-label="שגיאה">⚠️</span> ${
-      ({ notfound: "לא נמצא חדר עם הקוד הזה. בדקו את הספרות.", denied: DENIED_MSG })[res.reason] ?? "לא הצלחנו להתחבר. בדקו את החיבור ונסו שוב."
+    err.innerHTML = `<span role="img" aria-label="${STR.common.error}">⚠️</span> ${
+      ({ notfound: STR.net.joinNotFound, denied: DENIED_MSG })[res.reason] ?? STR.net.joinFailed
     }`;
     input.focus();
   }
@@ -1174,7 +1193,7 @@ function reportCopy(button, ok) {
   clearTimeout(copyTimers.get(button));
   button.removeAttribute("data-copied");
   button.removeAttribute("data-failed");
-  let message = ok ? "הועתק" : "ההעתקה נכשלה";
+  let message = ok ? STR.copy.done : STR.copy.failed;
   if (message === lastCopyMessage) message += " "; // VoiceOver מדלג על הודעה זהה לקודמת
   lastCopyMessage = message.trim();
   tip.textContent = "";
@@ -1194,7 +1213,11 @@ async function copyText(button, target) {
   const text = target.matches("input, textarea") ? target.value : target.innerText.trim();
   if (!text) return;
   try {
-    await navigator.clipboard.writeText(text);
+    if (native?.copy) {
+      if (!native.copy(text)) throw new Error("copy failed"); // אנדרואיד: לוח ההעתקה של המערכת
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
     reportCopy(button, true);
   } catch {
     reportCopy(button, false);
@@ -1221,6 +1244,36 @@ if ("CommandEvent" in window) {
   });
 }
 
+/* ───────────── טקסטים סטטיים וכפתור חזרה ───────────── */
+
+// אלמנטים ב-index.html עם data-str="קבוצה.מפתח" מקבלים את הטקסט מ-strings.js
+function applyStaticStrings() {
+  for (const el of document.querySelectorAll("[data-str]")) {
+    const value = el.dataset.str.split(".").reduce((obj, key) => obj?.[key], STR);
+    if (typeof value === "string") el.textContent = value;
+  }
+}
+applyStaticStrings();
+
+// כפתור "חזרה" של אנדרואיד. MainActivity קורא לפונקציה הזו: true = הדף טיפל בלחיצה, false = לצאת מהאפליקציה.
+window.aliasOnBack = () => {
+  const dialog = document.querySelector("dialog[open]");
+  if (dialog) {
+    dialog.close();
+    return true;
+  }
+  if (S.code) {
+    leaveDialog.showModal(); // בתוך חדר: שואלים אם לעזוב
+    return true;
+  }
+  const screen = document.body.dataset.screen;
+  if (screen === "setup" || screen === "howto") {
+    goHome();
+    return true;
+  }
+  return false;
+};
+
 /* ───────────── טעינה ───────────── */
 
 async function fetchJson(path) {
@@ -1233,8 +1286,8 @@ function renderLoadError() {
   show(
     `
     <div class="center grow">
-      <h1 class="page-title">לא הצלחתי לטעון את המשחק</h1>
-      <p class="lead">קבצי הרמות והמילים לא נטענו. אם פתחתם את index.html ישירות מהמחשב, צריך להריץ שרת מקומי, למשל:</p>
+      <h1 class="page-title">${STR.loadError.title}</h1>
+      <p class="lead">${STR.loadError.text}</p>
       <p class="pill"><span class="num">python -m http.server 8000</span></p>
     </div>`,
     "error",
@@ -1258,15 +1311,15 @@ async function init() {
   // קישור עם ?room=123456 מצטרף ישר. אחרת חוזרים לחדר האחרון, אם הוא עדיין קיים.
   const params = new URLSearchParams(location.search);
   const fromLink = params.get("room");
-  const code = R.isValidCode(fromLink) ? fromLink : load(KEY_LAST_ROOM, "session");
+  const code = R.isValidCode(fromLink) ? fromLink : load(KEY_LAST_ROOM, ROOM_AREA);
   if (fromLink !== null) history.replaceState(null, "", location.pathname);
   if (R.isValidCode(code)) {
     const res = await joinRoom(code);
     if (res.ok) return;
-    if (res.reason === "notfound") save(KEY_LAST_ROOM, null, "session");
+    if (res.reason === "notfound") save(KEY_LAST_ROOM, null, ROOM_AREA);
     goHome();
     if (res.reason === "denied") toast(DENIED_MSG, 6000);
-    else if (fromLink !== null) toast(res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה" : "לא הצלחנו להתחבר לחדר", 3200);
+    else if (fromLink !== null) toast(res.reason === "notfound" ? STR.net.linkNotFound : STR.net.linkFailed, 3200);
     return;
   }
   goHome();

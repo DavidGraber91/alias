@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- אנדרואיד 12+: צבע הרקע של מסך הפתיחה של המערכת -->
+    <style name="Theme.Alias" parent="Base.Theme.Alias">
+        <item name="android:windowSplashScreenBackground">@color/alias_background</item>
+    </style>
+</resources>

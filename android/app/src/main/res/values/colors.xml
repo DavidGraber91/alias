@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- אותו סגול כהה כמו theme_color באתר -->
+    <color name="alias_background">#1A0B3D</color>
+    <color name="ic_launcher_background">#1A0B3D</color>
+</resources>

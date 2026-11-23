@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  strings.xml — הטקסטים של מעטפת האנדרואיד עצמה (מה שאנדרואיד דורש שיהיה כאן).
+  כל הטקסטים שבתוך המשחק (מסכים, כפתורים, עקיצות) נמצאים בקובץ אחד משותף לאתר ולאפליקציה:
+  android/app/src/main/assets/www/strings.js  (המקור: strings.js בשורש הפרויקט)
+-->
+<resources>
+    <!-- השם מתחת לאייקון ובמסך האפליקציות האחרונות -->
+    <string name="app_name">אליאס</string>
+    <!-- כותרת חלון השיתוף של אנדרואיד -->
+    <string name="share_chooser_title">שיתוף המשחק</string>
+    <!-- מופיע בלחיצה על "חזרה" במסך הבית -->
+    <string name="press_back_again">לחצו שוב על חזרה כדי לצאת</string>
+    <!-- רכיב ה-WebView של המערכת חסר או מושבת -->
+    <string name="webview_unavailable">אי אפשר לפתוח את המשחק: רכיב ה-WebView של המערכת לא זמין. עדכנו או הפעילו את Android System WebView.</string>
+</resources>

@@ -1,8 +1,6 @@
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
-  
-  <meta name="google-site-verification" content="ILooUri6JQFPADMEo8n0Lj_wNRp7-vr6wK2zrbl4tHU"/>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="text-scale" content="scale">
@@ -11,22 +9,22 @@
   <title>אליאס – משחק מילים חינם לקבוצות, אונליין בעברית</title>
   <meta name="description" content="אליאס: משחק מילים בעברית לקבוצות. מסבירים מילה בלי להגיד אותה והקבוצה מנחשת. משחקים מטלפון אחד או מכמה טלפונים עם קוד משחק, בלי הרשמה.">
   <meta name="robots" content="index, follow, max-image-preview:large">
-  <link rel="canonical" href="https://davidgraber91.github.io/alias/">
+  <link rel="canonical" href="https://USERNAME.github.io/REPO/">
 
   <meta property="og:type" content="website">
   <meta property="og:locale" content="he_IL">
   <meta property="og:site_name" content="אליאס">
   <meta property="og:title" content="אליאס – משחק מילים חינם לקבוצות">
   <meta property="og:description" content="מסבירים, מנחשים, זורמים. משחק מילים בעברית מטלפון אחד או מכמה טלפונים עם קוד משחק.">
-  <meta property="og:url" content="https://davidgraber91.github.io/alias/">
-  <meta property="og:image" content="https://davidgraber91.github.io/alias/og-image.png">
+  <meta property="og:url" content="https://USERNAME.github.io/REPO/">
+  <meta property="og:image" content="https://USERNAME.github.io/REPO/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="אליאס – משחק מילים לקבוצות">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="אליאס – משחק מילים חינם לקבוצות">
   <meta name="twitter:description" content="מסבירים, מנחשים, זורמים. משחק מילים בעברית מטלפון אחד או מכמה טלפונים.">
-  <meta name="twitter:image" content="https://davidgraber91.github.io/alias/og-image.png">
+  <meta name="twitter:image" content="https://USERNAME.github.io/REPO/og-image.png">
 
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="icon" href="icon-192.png" type="image/png" sizes="192x192">
@@ -38,7 +36,7 @@
     "@context": "https://schema.org",
     "@type": "WebApplication",
     "name": "אליאס",
-    "url": "https://davidgraber91.github.io/alias/",
+    "url": "https://USERNAME.github.io/REPO/",
     "description": "משחק מילים בעברית לקבוצות: מסבירים מילה בלי להגיד אותה והקבוצה מנחשת. אפשר לשחק מטלפון אחד או מכמה טלפונים עם קוד משחק.",
     "inLanguage": "he",
     "applicationCategory": "GameApplication",
@@ -62,20 +60,20 @@
   <div id="toast" class="toast" popover="manual" role="status"></div>
 
   <dialog id="leave-dialog" aria-labelledby="leave-title">
-    <h2 id="leave-title">לעזוב את החדר?</h2>
-    <p>המשחק ממשיך אצל האחרים, ואפשר לחזור עם אותו קוד.</p>
+    <h2 id="leave-title" data-str="dialogs.leaveTitle"></h2>
+    <p data-str="dialogs.leaveText"></p>
     <form method="dialog" class="dialog-actions">
-      <button class="btn" value="cancel" autofocus>להישאר</button>
-      <button class="btn bad" value="leave">לעזוב</button>
+      <button class="btn" value="cancel" autofocus data-str="dialogs.stay"></button>
+      <button class="btn bad" value="leave" data-str="dialogs.leave"></button>
     </form>
   </dialog>
 
   <dialog id="share-dialog" aria-labelledby="share-title" closedby="any">
-    <h2 id="share-title">קישור להצטרפות</h2>
-    <p>העתיקו את הקישור ושלחו אותו.</p>
+    <h2 id="share-title" data-str="dialogs.shareTitle"></h2>
+    <p data-str="dialogs.shareText"></p>
     <input class="field" readonly aria-labelledby="share-title" dir="ltr">
     <form method="dialog" class="dialog-actions">
-      <button class="btn" value="close" autofocus>סגירה</button>
+      <button class="btn" value="close" autofocus data-str="dialogs.close"></button>
     </form>
   </dialog>
 

@@ -2,13 +2,14 @@
 // המצב כולו הוא אובייקטים פשוטים, ולכן אפשר לשמור אותו ב-localStorage כמו שהוא
 // וקל לבדוק אותו (ראו tests/game.test.js).
 
+import { STR, t } from "./strings.js";
+
 export const LIMITS = { minTeams: 2, maxTeams: 6, minRounds: 1, maxRounds: 10 };
 export const TURN_SECONDS_OPTIONS = [30, 45, 60, 90];
 export const LAST_CHANCE_OPTIONS = [10, 20, 0]; // 0 = עד שהמסביר/ה לוחץ/ת
 const SECONDS_PER_WORD = 8; // הערכה גסה: כמה מילים עוברות בתור
 
-const LETTERS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳"];
-export const defaultTeamName = (i) => `קבוצה ${LETTERS[i] ?? i + 1}`;
+export const defaultTeamName = (i) => t(STR.teams.default, { letter: STR.teams.letters[i] ?? i + 1 });
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
 /* ───────────── הגדרות ───────────── */
@@ -105,7 +106,7 @@ function normalizeTeamNames(names) {
 export function createGame(settings, words, rng = Math.random) {
   const names = normalizeTeamNames(settings.teams);
   const pool = poolFor(words, settings.levels);
-  if (pool.length === 0) throw new Error("אין מילים ברמות שנבחרו");
+  if (pool.length === 0) throw new Error(STR.errors.noWords);
 
   // תור = קבוצה אחת. בכל סיבוב כל קבוצה משחקת פעם אחת.
   const queue = [];
