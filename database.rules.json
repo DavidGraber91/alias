@@ -4,17 +4,20 @@
     ".write": false,
     "stats": {
       ".read": "auth != null && auth.token.email == 'davidgraber91@gmail.com' && auth.token.email_verified == true",
-      "created": { ".write": "newData.isNumber()" }
+      "created": {
+        ".write": "newData.isNumber() && (!data.exists() ? newData.val() == 1 : newData.val() == data.val() + 1)"
+      }
     },
     "rooms": {
       ".read": "auth != null && auth.token.email == 'davidgraber91@gmail.com' && auth.token.email_verified == true",
       "$code": {
         ".read": true,
         ".write": "newData.exists() || (auth != null && auth.token.email == 'davidgraber91@gmail.com' && auth.token.email_verified == true)",
-        ".validate": "newData.hasChildren(['s', 't'])",
-        "s": { ".validate": "newData.isString()" },
+        ".validate": "$code.length == 6 && newData.hasChildren(['s', 't'])",
+        "s": { ".validate": "newData.isString() && newData.val().length < 60000" },
         "t": { ".validate": "newData.isNumber()" },
-        "u": { ".validate": "newData.isNumber()" }
+        "u": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
       }
     }
   }

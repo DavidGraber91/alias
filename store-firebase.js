@@ -7,14 +7,29 @@
 // הגרסה מקובעת (ולא latest) כדי ששינוי אצל ספק ה-CDN לא ישבור את המשחק בלי שנדע.
 const SDK = "https://www.gstatic.com/firebasejs/11.10.0";
 
-export async function open(code, config) {
-  const [{ initializeApp }, db] = await Promise.all([
-    import(`${SDK}/firebase-app.js`),
-    import(`${SDK}/firebase-database.js`),
-  ]);
-  const { getDatabase, ref, onValue, runTransaction, update, increment } = db;
+// טוענים את הספרייה ופותחים את החיבור פעם אחת. preload() מתחיל את זה כבר בפתיחת האפליקציה,
+// כך שעד שלוחצים "משחק חדש" הכול כבר מוכן (בלי זה, בחיבור סלולרי איטי יצירת חדר מחכה להורדת הספרייה).
+let ready = null;
+function init(config) {
+  ready ??= (async () => {
+    const [{ initializeApp }, db] = await Promise.all([
+      import(`${SDK}/firebase-app.js`),
+      import(`${SDK}/firebase-database.js`),
+    ]);
+    const database = db.getDatabase(initializeApp(config));
+    db.onValue(db.ref(database, ".info/connected"), () => {}); // מנוי ראשון פותח את החיבור לשרת מיד
+    return { db, database };
+  })();
+  ready.catch(() => (ready = null)); // כישלון (אין רשת) לא נשמר, ובפעם הבאה מנסים שוב
+  return ready;
+}
 
-  const database = getDatabase(initializeApp(config));
+export const preload = (config) => init(config);
+
+export async function open(code, config) {
+  const { db, database } = await init(config);
+  const { ref, onValue, runTransaction, set, increment } = db;
+
   const room = ref(database, `rooms/${code}`);
 
   let offset = 0;
@@ -32,15 +47,25 @@ export async function open(code, config) {
 
   return {
     code,
-    subscribe(cb) {
-      return onValue(room, (snap) => cb(parse(snap.val())));
+    subscribe(cb, onError) {
+      // onError מקבל שגיאה כמו permission_denied, כדי שההודעה תוצג למשתמש
+      return onValue(room, (snap) => cb(parse(snap.val())), (err) => onError?.(err));
     },
     async transact(fn) {
+      let isNew = false;
       const res = await runTransaction(room, (cur) => {
+        isNew = !cur; // הפונקציה יכולה לרוץ כמה פעמים; הערך מהריצה האחרונה (זו שנשמרה) הוא הנכון
         const next = fn(parse(cur));
         if (next === undefined || next === null) return; // מבטל את הטרנזקציה
-        return { s: JSON.stringify(next), t: cur?.t ?? Date.now() };
+        // t = זמן יצירה, u = עדכון אחרון (דף הניהול משתמש בו כדי לדעת אילו חדרים פעילים)
+        return { s: JSON.stringify(next), t: cur?.t ?? Date.now(), u: Date.now() + offset };
       });
+      if (res.committed && isNew) {
+        // מונה "נוצרו בסך הכול" (stats/created). increment() מוסיף 1 בשרת, בלי לקרוא את הערך:
+        // טרנזקציה הייתה דורשת הרשאת קריאה, ו-stats לא פתוח לקריאה למשחק (רק לאדמין).
+        // כישלון לא מפריע למשחק, אבל נרשם ב-console כדי שאפשר יהיה לאבחן.
+        set(ref(database, "stats/created"), increment(1)).catch((err) => console.warn("stats/created:", err?.message));
+      }
       return { committed: res.committed, state: parse(res.snapshot.val()) };
     },
     serverNow: () => Date.now() + offset,
@@ -50,8 +75,5 @@ export async function open(code, config) {
     close() {
       offStop();
     },
-
-    countCreated: () => update(ref(database, "stats"), { created: increment(1) }),
   };
-
 }

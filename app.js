@@ -10,7 +10,7 @@
 import * as G from "./game.js";
 import * as R from "./room.js";
 import { quip } from "./quips.js";
-import { openStore, isOnline } from "./store.js";
+import { openStore, isOnline, preload } from "./store.js";
 import { STR, t as tpl } from "./strings.js";
 import { WEB_URL } from "./app-config.js";
 
@@ -1296,6 +1296,7 @@ function renderLoadError() {
 
 async function init() {
   S.clientId = makeClientId();
+  preload(); // מתחילים לטעון את Firebase כבר עכשיו, במקביל לטעינת המילים
   try {
     const [levels, words] = await Promise.all([fetchJson("levels.json"), fetchJson("words.json")]);
     S.levels = levels.filter((l) => l && l.id !== undefined && l.name);
