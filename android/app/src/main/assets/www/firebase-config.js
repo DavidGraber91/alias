@@ -22,3 +22,6 @@ export const firebaseConfig = {
     appId: "1:1069152583614:web:925ab86f053a492f6b83ef",
     measurementId: "G-NJZBXZFQ6H"
   };
+
+  
+

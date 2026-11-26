@@ -21,6 +21,8 @@ OUT = HERE / "app" / "src" / "main" / "assets" / "www"
 # רשימת היתרים: רק מה שהמשחק צריך בזמן ריצה. בלי בדיקות, README, SEO ודף הניהול.
 INCLUDE = [
     "index.html",
+    "boys-vs-girls.html",
+    "how-to-play.html",
     "style.css",
     "app.js",
     "app-config.js",
@@ -34,6 +36,8 @@ INCLUDE = [
     "store-firebase.js",
     "levels.json",
     "words.json",
+    "words-gender.json",
+    "levels-gender.json",
     "manifest.webmanifest",
     "icon.svg",
     "icon-192.png",

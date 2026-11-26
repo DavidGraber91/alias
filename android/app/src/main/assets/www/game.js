@@ -13,7 +13,7 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
 /* ───────────── מצב "בנים נגד בנות" ─────────────
    אותו משחק, אותו ניקוד ואותן תורות. ההבדל היחיד: כל מילה מסומנת בעולם שהיא באה ממנו
-   ("female" = עולם הבנות, "male" = עולם הבנים), והמסביר/ה מקבל/ת תמיד מילה מהעולם של המין השני.
+   ("female" = עולם הבנות, "male" = עולם הבנים). הבנים מסבירים מילים מעולם הבנות, והבנות מילים מעולם הבנים.
      format "teams":   שתי קבוצות. קבוצה 0 = הבנים (מסביר בן), קבוצה 1 = הבנות (מסבירה בת).
      format "couples": כל קבוצה היא זוג. בכל תור של הזוג המסביר/ה מתחלף/ת בין הבן לבת. */
 
@@ -198,7 +198,7 @@ export function roundInfo(game) {
 
 /* ───────────── תור ───────────── */
 
-// בבנים נגד בנות: מושכים מילה מהעולם שהמסביר/ה צריך/ה לקבל (wordGender). כשהמילים של העולם הזה
+// בבנים נגד בנות: מושכים מילה מהעולם שהמסביר מקבל (wordGender), כלומר העולם של המין השני. כשהמילים של העולם הזה
 // נגמרו, מערבבים מחדש רק את המילים שכבר יצאו מאותו עולם.
 function takeWord(game, rng) {
   const wanted = game.turn.wordGender;
@@ -237,7 +237,7 @@ export function startTurn(game, rng = Math.random) {
   const explainerGender = explainerGenderAt(game, game.turnIndex);
   if (explainerGender) {
     game.turn.explainerGender = explainerGender; // מי מסביר/ה: "male" | "female"
-    game.turn.wordGender = oppositeGender(explainerGender); // מאיזה עולם המילים
+    game.turn.wordGender = oppositeGender(explainerGender); // מאיזה עולם המילים: הבנים מסבירים מעולם הבנות ולהפך
   }
   return drawEntry(game, rng);
 }

@@ -7,29 +7,49 @@
 // הגרסה מקובעת (ולא latest) כדי ששינוי אצל ספק ה-CDN לא ישבור את המשחק בלי שנדע.
 const SDK = "https://www.gstatic.com/firebasejs/11.10.0";
 
-// טוענים את הספרייה ופותחים את החיבור פעם אחת. preload() מתחיל את זה כבר בפתיחת האפליקציה,
-// כך שעד שלוחצים "משחק חדש" הכול כבר מוכן (בלי זה, בחיבור סלולרי איטי יצירת חדר מחכה להורדת הספרייה).
-let ready = null;
-function init(config) {
-  ready ??= (async () => {
-    const [{ initializeApp }, db] = await Promise.all([
-      import(`${SDK}/firebase-app.js`),
-      import(`${SDK}/firebase-database.js`),
-    ]);
-    const database = db.getDatabase(initializeApp(config));
-    db.onValue(db.ref(database, ".info/connected"), () => {}); // מנוי ראשון פותח את החיבור לשרת מיד
-    return { db, database };
-  })();
-  ready.catch(() => (ready = null)); // כישלון (אין רשת) לא נשמר, ובפעם הבאה מנסים שוב
-  return ready;
+// ה-SDK (שני קבצים מ-CDN) נטען פעם אחת ונשמר כהבטחה, כך שאפשר להתחיל להוריד אותו כבר כשהדף עולה
+// (preload), והמשחק לא יחכה לו כשלוחצים "משחק חדש". בלי חיבור לשרת: החיבור נפתח רק בפעולה הראשונה
+// מול החדר, כדי שמי שרק גולש בדף הבית לא יתפוס חיבור פתוח (ב-Firebase יש תקרה של חיבורים בו-זמניים).
+let sdkPromise = null;
+let databasePromise = null;
+
+function loadSdk() {
+  if (!sdkPromise) {
+    const p = Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-database.js`)]).then(
+      ([app, db]) => ({ ...app, ...db }),
+    );
+    sdkPromise = p;
+    p.catch(() => {
+      if (sdkPromise === p) sdkPromise = null; // כישלון (רשת חלשה) לא נשמר, ופעולה הבאה תנסה שוב
+    });
+  }
+  return sdkPromise;
 }
 
-export const preload = (config) => init(config);
+function loadDatabase(config) {
+  if (!databasePromise) {
+    const p = loadSdk().then(({ initializeApp, getDatabase }) => getDatabase(initializeApp(config)));
+    databasePromise = p;
+    p.catch(() => {
+      if (databasePromise === p) databasePromise = null;
+    });
+  }
+  return databasePromise;
+}
+
+// מתחיל להוריד ולהכין את ה-SDK ברקע. לא זורק שגיאה, וקריאה חוזרת לא עושה כלום.
+export function preload(config) {
+  return loadDatabase(config).then(
+    () => true,
+    () => false,
+  );
+}
 
 export async function open(code, config) {
-  const { db, database } = await init(config);
-  const { ref, onValue, runTransaction, set, increment } = db;
-
+  const [database, { ref, onValue, runTransaction, update, increment }] = await Promise.all([
+    loadDatabase(config),
+    loadSdk(),
+  ]);
   const room = ref(database, `rooms/${code}`);
 
   let offset = 0;
@@ -47,25 +67,15 @@ export async function open(code, config) {
 
   return {
     code,
-    subscribe(cb, onError) {
-      // onError מקבל שגיאה כמו permission_denied, כדי שההודעה תוצג למשתמש
-      return onValue(room, (snap) => cb(parse(snap.val())), (err) => onError?.(err));
+    subscribe(cb) {
+      return onValue(room, (snap) => cb(parse(snap.val())));
     },
     async transact(fn) {
-      let isNew = false;
       const res = await runTransaction(room, (cur) => {
-        isNew = !cur; // הפונקציה יכולה לרוץ כמה פעמים; הערך מהריצה האחרונה (זו שנשמרה) הוא הנכון
         const next = fn(parse(cur));
         if (next === undefined || next === null) return; // מבטל את הטרנזקציה
-        // t = זמן יצירה, u = עדכון אחרון (דף הניהול משתמש בו כדי לדעת אילו חדרים פעילים)
-        return { s: JSON.stringify(next), t: cur?.t ?? Date.now(), u: Date.now() + offset };
+        return { s: JSON.stringify(next), t: cur?.t ?? Date.now() };
       });
-      if (res.committed && isNew) {
-        // מונה "נוצרו בסך הכול" (stats/created). increment() מוסיף 1 בשרת, בלי לקרוא את הערך:
-        // טרנזקציה הייתה דורשת הרשאת קריאה, ו-stats לא פתוח לקריאה למשחק (רק לאדמין).
-        // כישלון לא מפריע למשחק, אבל נרשם ב-console כדי שאפשר יהיה לאבחן.
-        set(ref(database, "stats/created"), increment(1)).catch((err) => console.warn("stats/created:", err?.message));
-      }
       return { committed: res.committed, state: parse(res.snapshot.val()) };
     },
     serverNow: () => Date.now() + offset,
@@ -75,5 +85,8 @@ export async function open(code, config) {
     close() {
       offStop();
     },
+
+    countCreated: () => update(ref(database, "stats"), { created: increment(1) }),
   };
+
 }

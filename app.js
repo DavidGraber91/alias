@@ -8,7 +8,7 @@
 import * as G from "./game.js";
 import * as R from "./room.js";
 import { quip } from "./quips.js";
-import { openStore, isOnline } from "./store.js";
+import { openStore, forgetLocal, isOnline } from "./store.js";
 
 const $app = document.getElementById("app");
 const $toast = document.getElementById("toast");
@@ -20,6 +20,7 @@ const WORDS_FILE = MODE === "gender" ? "words-gender.json" : "words.json";
 const LEVELS_FILE = MODE === "gender" ? "levels-gender.json" : "levels.json"; // בבנים נגד בנות הקובץ הזה אופציונלי
 const KEY_SETTINGS = MODE === "gender" ? "alias.settings.gender.v1" : "alias.settings.v1";
 const DENIED_MSG = "Firebase חוסם את החדר. בדקו שפרסמתם את הכללים (Rules ← Publish) ושה-databaseURL נכון.";
+const KEY_LAST_OFFLINE = "alias.lastRoomOffline.v1"; // ב-sessionStorage: החדר האחרון הוא משחק אופליין (מקומי, בלי רשת)
 const KEY_LAST_ROOM = "alias.lastRoom.v1"; // ב-sessionStorage: רענון חוזר לחדר, לשונית חדשה לא "חוטפת" חדר של לשונית אחרת
 const KEY_CLIENT = "alias.client.v1"; // ב-sessionStorage: כל לשונית/טלפון הוא "שחקן" נפרד
 
@@ -30,6 +31,8 @@ const S = {
   settings: null,
   clientId: null,
   store: null, // החדר הפעיל
+  offline: false, // החדר הפעיל הוא משחק אופליין: בטלפון אחד, שמור במכשיר, בלי Firebase
+  nextOffline: false, // המשחק שעומדים להגדיר יהיה אופליין
   code: null,
   room: null, // המצב האחרון שהתקבל מהחדר
   stopRoom: null,
@@ -115,8 +118,8 @@ const quipHtml = (kind) => `<p class="quip">${esc(quip(kind))}</p>`;
 // ניסוח לפי סוג היחידה: קבוצה, או זוג (בבנים נגד בנות במצב זוגות)
 function unitOf(settings) {
   return G.isGender(settings) && settings.format === "couples"
-    ? { explaining: "הזוג המסביר", winner: "הזוג המנצח", tie: "תיקו בין הזוגות", leading: "הזוגות האלה מובילים", each: "כל אחד משחק" }
-    : { explaining: "הקבוצה המסבירה", winner: "הקבוצה המנצחת", tie: "תיקו בין הקבוצות", leading: "הקבוצות האלה מובילות", each: "כל אחת משחקת" };
+    ? { guessed: "איזה זוג ניחש נכון?", explaining: "הזוג המסביר", winner: "הזוג המנצח", tie: "תיקו בין הזוגות", leading: "הזוגות האלה מובילים", each: "כל אחד משחק" }
+    : { guessed: "איזו קבוצה ניחשה נכון?", explaining: "הקבוצה המסבירה", winner: "הקבוצה המנצחת", tie: "תיקו בין הקבוצות", leading: "הקבוצות האלה מובילות", each: "כל אחת משחקת" };
 }
 
 // הכיתוב של העולם שממנו המילים בתור הנוכחי (רק בבנים נגד בנות)
@@ -130,9 +133,18 @@ const WORLD = {
     press: "הבת לוחצת על הכפתור.", pressTeam: "מי מהבנות שרוצה להסביר לוחצת על הכפתור.",
   },
 };
-// explainerGender = מי מסביר/ה. המילים תמיד מהעולם של המין השני.
+// explainerGender = מי מסביר. המילים תמיד מהעולם של המין השני.
 const worldPill = (explainerGender) =>
   explainerGender ? `<span class="pill world">${WORLD[G.oppositeGender(explainerGender)].icon} מילים מ${WORLD[G.oppositeGender(explainerGender)].world}</span>` : "";
+
+// ניסוח לפי מין המסביר. כשהמין ידוע אין צורך ב"/ה" ו"/ת". כשלא ידוע (משחק רגיל) נשארות שתי הצורות.
+function speaker(gender) {
+  if (gender === "male")
+    return { explainer: "המסביר", previous: "המסביר הקודם", iExplain: "אני מסביר", theirs: "שלו", checks: "בודק ומאשר", whoUnresponsive: "הטלפון של המסביר לא מגיב?", becomesWatcher: "יהפוך לצופה" };
+  if (gender === "female")
+    return { explainer: "המסבירה", previous: "המסבירה הקודמת", iExplain: "אני מסבירה", theirs: "שלה", checks: "בודקת ומאשרת", whoUnresponsive: "הטלפון של המסבירה לא מגיב?", becomesWatcher: "תהפוך לצופה" };
+  return { explainer: "המסביר/ה", previous: "המסביר/ה הקודם/ת", iExplain: "אני מסביר/ה", theirs: "שלו/ה", checks: "בודק/ת ומאשר/ת", whoUnresponsive: "הטלפון המסביר/ה לא מגיב?", becomesWatcher: "יהפוך/תהפוך לצופה" };
+}
 
 function show(html, screen) {
   document.body.dataset.screen = screen;
@@ -215,10 +227,11 @@ function peek(store) {
   });
 }
 
-function attach(store, code) {
+function attach(store, code, offline = false) {
   detach();
   S.store = store;
   S.code = code;
+  S.offline = offline;
   S.room = null;
   S.viewKey = "";
   S.fired = null;
@@ -227,9 +240,17 @@ function attach(store, code) {
     $net.textContent = ok ? "" : "אין חיבור. מנסים להתחבר מחדש…";
   });
   save(KEY_LAST_ROOM, code, "session");
+  save(KEY_LAST_OFFLINE, offline ? true : null, "session");
+}
+
+// החדר האחרון נשכח (יציאה, חדר שנסגר, קוד שלא נמצא)
+function forgetLastRoom() {
+  save(KEY_LAST_ROOM, null, "session");
+  save(KEY_LAST_OFFLINE, null, "session");
 }
 
 function detach() {
+  if (S.offline && S.code) forgetLocal(S.code); // משחק אופליין נמחק מהמכשיר כשיוצאים ממנו
   stopTimers();
   releaseWakeLock();
   S.stopRoom?.();
@@ -237,22 +258,23 @@ function detach() {
   S.store?.close();
   S.store = S.stopRoom = S.stopNet = null;
   S.code = null;
+  S.offline = false;
   S.room = null;
   S.viewKey = "";
   $net.textContent = "";
 }
 
 /** מצטרף לחדר קיים. מחזיר { ok: true } או { ok: false, reason: "notfound" | "offline" } */
-async function joinRoom(code) {
+async function joinRoom(code, { offline = false } = {}) {
   let store;
   try {
-    store = await openStore(code);
+    store = await openStore(code, { offline });
     const state = await peek(store);
     if (state === null) {
       store.close();
       return { ok: false, reason: "notfound" };
     }
-    attach(store, code);
+    attach(store, code, offline);
     return { ok: true };
   } catch (err) {
     console.error(err);
@@ -262,14 +284,14 @@ async function joinRoom(code) {
 }
 
 /** יוצר חדר חדש מההגדרות ומתחבר אליו */
-async function createRoom(settings) {
+async function createRoom(settings, { offline = false } = {}) {
   const initial = R.createRoomState(settings, S.words);
   for (let attempt = 0; attempt < 6; attempt++) {
     const code = R.newCode();
-    const store = await openStore(code);
+    const store = await openStore(code, { offline });
     const res = await store.transact((cur) => (cur ? null : initial)); // לא דורסים חדר קיים
     if (res.committed) {
-      attach(store, code);
+      attach(store, code, offline);
       return true;
     }
     store.close();
@@ -283,7 +305,7 @@ function onStoreError(err) {
 }
 
 function leaveRoom() {
-  save(KEY_LAST_ROOM, null, "session");
+  forgetLastRoom();
   detach();
   goHome();
 }
@@ -312,7 +334,7 @@ function onRoom(state) {
     // החדר נמחק מתחת לרגליים שלנו
     if (S.store) {
       toast("החדר נסגר");
-      save(KEY_LAST_ROOM, null, "session");
+      forgetLastRoom();
       detach();
       goHome();
     }
@@ -379,6 +401,12 @@ function updateView(st, role) {
 
 // פס החדר: הקוד, העתקה, שיתוף ויציאה. הכפתורים מוגדרים בהצהרה (command/commandfor), בלי JS לכל כפתור.
 function roomBar() {
+  if (S.offline)
+    return `
+    <div class="roombar">
+      <span class="pill">📴 משחק אופליין</span>
+      <button type="button" class="link" command="show-modal" commandfor="leave-dialog">יציאה</button>
+    </div>`;
   return `
     <div class="roombar">
       <span class="pill">חדר <span class="num" id="room-code">${esc(S.code)}</span></span>
@@ -392,12 +420,15 @@ function roomBar() {
 }
 
 // מי שהמסביר/ה נעלם/ה (הטלפון כבה, נסגר הדף) יכול לקחת את השליטה
-const takeoverHtml = () => `
+const takeoverHtml = (explainerGender = null) => {
+  const w = speaker(explainerGender);
+  return `
   <details class="help">
-    <summary>הטלפון המסביר/ה לא מגיב?</summary>
-    <p>אפשר לקחת את השליטה בשלב הזה. המסביר/ה הקודם/ת יהפוך/תהפוך לצופה.</p>
+    <summary>${w.whoUnresponsive}</summary>
+    <p>אפשר לקחת את השליטה בשלב הזה. ${w.previous} ${w.becomesWatcher}.</p>
     <button type="button" class="btn" data-action="takeover">אני לוקח/ת את השליטה</button>
   </details>`;
+};
 
 function entryLines(st, editable) {
   const g = st.game;
@@ -424,22 +455,33 @@ const joinFormHtml = () => `
         <p class="error-msg shown" id="join-error" role="alert"></p>
       </form>`;
 
+// כפתור משחק אופליין. מוצג רק כש-Firebase מוגדר, כי בלי Firebase כל משחק הוא ממילא מקומי.
+// כשהדפדפן יודע שאין אינטרנט, הכפתור הופך לראשי.
+function offlineHtml() {
+  if (!isOnline) return "";
+  const down = navigator.onLine === false;
+  return `
+      <button class="btn ${down ? "primary big" : "ghost"}" data-action="offline">📴 משחק אופליין (טלפון אחד)</button>
+      ${down ? `<p class="note-local">אין חיבור לאינטרנט כרגע. משחק אופליין עובד גם בלי רשת.</p>` : ""}`;
+}
+
 const localNoteHtml = () =>
   isOnline ? "" : `<p class="note-local">מצב מקומי: אפשר לבדוק עם כמה לשוניות באותו דפדפן. כדי לשחק בין טלפונים צריך להגדיר Firebase (ראו README).</p>`;
 
 // שאלות ותשובות בדף הבית של בנים נגד בנות. הטקסט גם נראה לשחקנים וגם נקרא על ידי גוגל (הדף נבנה ב-JS).
 const GENDER_FAQ = [
   ["איך משחקים בנים נגד בנות?", "מחלקים לשתי קבוצות, בנים ובנות, והן משחקות בתורות. כשבן מסביר, כל המילים שלו מגיעות מהעולם של הבנות, וכשבת מסבירה, המילים מהעולם של הבנים. מסבירים בלי להגיד את המילה, והקבוצה מנחשת כמה שיותר לפני שהזמן נגמר."],
-  ["אפשר לשחק בזוגות של בן ובת?", "כן. במצב זוגות כל זוג הוא קבוצה. בכל תור של הזוג המסביר/ה מתחלף בין בן הזוג לבת הזוג, והמילה תמיד מהעולם של השני. מי שמכיר את בן או בת הזוג שלו הכי טוב, מנצח."],
+  ["אפשר לשחק בזוגות של בן ובת?", "כן. במצב זוגות כל זוג הוא קבוצה. בכל תור של הזוג מתחלפים: פעם הבן מסביר מילה מעולם הבנות, ופעם הבת מסבירה מילה מעולם הבנים, ובן הזוג או בת הזוג מנסים לנחש. מי שמכיר את העולם של בן הזוג או בת הזוג הכי טוב, מנצח."],
   ["כמה אנשים צריך כדי לשחק?", "מארבעה שחקנים ומעלה. מספיק טלפון אחד שעובר בין השחקנים, ואפשר גם לשחק מכמה טלפונים עם קוד משחק."],
   ["צריך להירשם או להוריד אפליקציה?", "לא. המשחק חינם, בעברית, ועובד ישר בדפדפן בלי הרשמה ובלי התקנה."],
-  ["למה זה משחק מילים מעניין למסיבה?", "כי המסביר/ה יוצא/ת מאזור הנוחות. אי אפשר להסתמך על ידע אישי, וצריך לתאר מילה מעולם זר. ככה נולדים הרגעים המצחיקים שמתאימים לערב חברים, שבת משפחתית, מסיבת רווקים או רווקות, חתונה ויום הולדת."],
+  ["למה זה משחק מילים מעניין למסיבה?", "כי המסביר יוצא מאזור הנוחות. אי אפשר להסתמך על ידע אישי, וצריך לתאר מילה מעולם זר. ככה נולדים הרגעים המצחיקים שמתאימים לערב חברים, שבת משפחתית, מסיבת רווקים או רווקות, חתונה ויום הולדת."],
 ];
 
 function goHome() {
   stopTimers();
   releaseWakeLock();
   S.viewKey = "";
+  S.nextOffline = false;
   if (MODE === "gender") return goGenderHome();
   show(
     `
@@ -449,7 +491,8 @@ function goHome() {
       ${quipHtml("home")}
     </div>
     <div class="stack">
-      <button class="btn primary big" data-action="new">משחק חדש</button>
+      <button class="btn ${isOnline && navigator.onLine === false ? "ghost" : "primary big"}" data-action="new">משחק חדש</button>
+      ${offlineHtml()}
       ${joinFormHtml()}
       <button class="btn ghost" data-action="howto">איך משחקים?</button>
       <button class="btn ghost" data-action="share">שתפו את המשחק</button>
@@ -472,7 +515,8 @@ function goGenderHome() {
       ${quipHtml("home")}
     </div>
     <div class="stack">
-      <button class="btn primary big" data-action="new">משחק חדש</button>
+      <button class="btn ${isOnline && navigator.onLine === false ? "ghost" : "primary big"}" data-action="new">משחק חדש</button>
+      ${offlineHtml()}
       ${joinFormHtml()}
       <button class="btn ghost" data-action="share">שתפו את המשחק</button>
       <a class="btn ghost" href="./">חזרה לאליאס הרגיל</a>
@@ -481,7 +525,7 @@ function goGenderHome() {
     <article class="panel doc">
       <section>
         <h2>משחק מילים בנים נגד בנות</h2>
-        <p>שני מצבי משחק: <b>קבוצת בנים מול קבוצת בנות</b>, או <b>זוגות של בן ובת</b>. בכל תור המסביר/ה מקבל/ת מילה מהעולם של המין השני, וצריך/ה להסביר אותה בלי להגיד אותה. אותו אליאס שאתם מכירים: ניקוד, דילוג, הזדמנות אחרונה, ואפשר גם מכמה טלפונים.</p>
+        <p>שני מצבי משחק: <b>קבוצת בנים מול קבוצת בנות</b>, או <b>זוגות של בן ובת</b>. בכל תור הבן מסביר מילה מעולם הבנות והבת מסבירה מילה מעולם הבנים, בלי להגיד אותה. אותו אליאס שאתם מכירים: ניקוד, דילוג, הזדמנות אחרונה, ואפשר גם מכמה טלפונים.</p>
       </section>
       <section>
         <h2>שאלות נפוצות</h2>
@@ -614,7 +658,7 @@ function setupHtml() {
       </div>
       <p class="sub">${
         couples
-          ? "כל זוג הוא קבוצה. בכל תור של הזוג, המסביר/ה מתחלף/ת בין הבן לבת, והמילים מהעולם של השני/ה."
+          ? "כל זוג הוא קבוצה. בכל תור של הזוג מתחלפים: פעם הבן מסביר מילה מעולם הבנות, ופעם הבת מסבירה מילה מעולם הבנים."
           : "קבוצת הבנים מסבירה מילים מעולם הבנות, וקבוצת הבנות מסבירה מילים מעולם הבנים. התורות מתחלפים."
       }</p>
     </section>`
@@ -673,6 +717,7 @@ function setupHtml() {
     <header class="topbar"><button class="link" data-action="home">חזרה</button></header>
     <h1 class="page-title">${gender ? "הגדרות – בנים נגד בנות" : "הגדרות משחק"}</h1>
 
+    ${S.nextOffline && isOnline ? `<p class="note">📴 משחק אופליין: טלפון אחד, בלי אינטרנט ובלי קוד משחק.</p>` : ""}
     ${formatPanel}
     ${teamsPanel}
 
@@ -730,11 +775,17 @@ async function startGame() {
   }
   save(KEY_SETTINGS, s);
   try {
-    const ok = await createRoom(s);
+    const ok = await createRoom(s, { offline: S.nextOffline });
     if (!ok) toast("לא הצלחנו ליצור חדר. נסו שוב.", 3200);
+    else S.nextOffline = false;
   } catch (err) {
     console.error(err);
-    toast(err?.message === "permission_denied" ? DENIED_MSG : "לא הצלחנו ליצור חדר. בדקו את החיבור.", 6000);
+    toast(
+      err?.message === "permission_denied"
+        ? DENIED_MSG
+        : "לא הצלחנו ליצור חדר. בדקו את החיבור, או חזרו למסך הראשי ושחקו אופליין.",
+      6000,
+    );
   }
 }
 
@@ -779,11 +830,11 @@ function goReady(st) {
           : g.settings.format === "couples"
             ? WORLD[explainerGender].press
             : WORLD[explainerGender].pressTeam
-      }<br>המילים יופיעו רק על הטלפון שלו/ה. כל השאר לא מציצים!</p>
+      }<br>המילים יופיעו רק על הטלפון ${speaker(explainerGender).theirs}. כל השאר לא מציצים!</p>
       ${quipHtml("ready")}
     </div>
     <div class="footer">
-      <button class="btn primary big" data-action="claim">אני מסביר/ה, מתחילים!</button>
+      <button class="btn primary big" data-action="claim">${speaker(explainerGender).iExplain}, מתחילים!</button>
     </div>`,
     "ready",
   );
@@ -830,7 +881,7 @@ function goPlaying(st) {
       <button class="btn good big" data-action="correct">נכון</button>
       <div class="row2${skipButton ? "" : " one"}">
         ${skipButton}
-        <button class="btn bad" data-action="taboo">אסור<small>${signed(-2)}</small></button>
+        <button class="btn bad" data-action="taboo">אסור<small>${signed(-1)}</small></button>
       </div>
     </div>`,
     "play",
@@ -891,7 +942,7 @@ function goWatching(st) {
     </div>
     <p class="lead center-text">טלפון אחר מקריא את המילים. אפשר לנחש בקול!</p>
     <ol class="entries log" id="log" role="log" aria-label="מילים שכבר נוחשו"></ol>
-    ${takeoverHtml()}`,
+    ${takeoverHtml(g.turn.explainerGender)}`,
     "watch",
   );
   window.scrollTo(0, 0);
@@ -998,7 +1049,7 @@ function goLastChance(st) {
     ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
     <div class="word-card" id="card"><div class="word ${wordSize(entry.word)}">${esc(entry.word)}</div></div>
     ${quipHtml("lastchance")}
-    <p class="lead">מי ניחש/ה נכון?</p>
+    <p class="lead">${unit.guessed}</p>
     <div class="stack">
       ${teamButtons}
       <button class="btn ghost on-light" data-action="lc-none">אף אחד לא ניחש</button>
@@ -1014,14 +1065,14 @@ function goLastChanceWatching(st) {
     `
     ${roomBar()}
     <p class="lc-banner">הזמן נגמר!</p>
-    <p class="lc-sub">המילה האחרונה על הטלפון של המסביר/ה. כולם יכולים לנחש.</p>
+    <p class="lc-sub">המילה האחרונה על הטלפון של ${speaker(st.game.turn.explainerGender).explainer}. כולם יכולים לנחש.</p>
     ${secs > 0 ? `<div class="timer-wrap"><div class="timer" id="lc-timer">${secs}</div></div>` : ""}
     ${quipHtml("lastchance")}
     <ol class="entries log" role="log" aria-label="מילים שכבר נוחשו">${[...R.resolvedEntries(st)]
       .reverse()
       .map((e) => `<li class="entry"><span>${esc(e.word)}</span>${badge(e, st.game)}</li>`)
       .join("")}</ol>
-    ${takeoverHtml()}`,
+    ${takeoverHtml(st.game.turn.explainerGender)}`,
     "lastchance",
   );
   window.scrollTo(0, 0);
@@ -1037,7 +1088,7 @@ function badge(entry, game) {
     case "skip":
       return `<span class="badge b-skip">דילוג${s.skip === "penalty" ? ` ${signed(-1)}` : ""}</span>`;
     case "taboo":
-      return `<span class="badge b-taboo">✗ אסור ${signed(-2)}</span>`;
+      return `<span class="badge b-taboo">✗ אסור ${signed(-1)}</span>`;
     case "stolen":
       return `<span class="badge b-stolen">${esc(game.teams[entry.teamId]?.name ?? "")} ${signed(s.stealPoints)}</span>`;
     default:
@@ -1068,7 +1119,7 @@ function summaryHtml(st, role) {
     <h1 class="page-title">סיכום התור</h1>
     ${
       hasEntries
-        ? `<p class="lead">${editable ? "לחצו על מילה כדי לתקן את התוצאה שלה." : "המסביר/ה בודק/ת את התוצאות ומאשר/ת."}</p>
+        ? `<p class="lead">${editable ? "לחצו על מילה כדי לתקן את התוצאה שלה." : `${speaker(g.turn.explainerGender).explainer} ${speaker(g.turn.explainerGender).checks} את התוצאות.`}</p>
            <${editable ? "div" : "ol"} class="entries" id="entries">${entryLines(st, editable)}</${editable ? "div" : "ol"}>`
         : `<p class="lead">לא נאספו מילים בתור הזה.</p>`
     }
@@ -1077,7 +1128,7 @@ function summaryHtml(st, role) {
     ${
       editable
         ? `<div class="footer"><button class="btn primary big" data-action="confirm-turn">אישור והמשך</button></div>`
-        : takeoverHtml()
+        : takeoverHtml(g.turn.explainerGender)
     }`;
 }
 
@@ -1172,9 +1223,19 @@ function changeRounds(delta) {
 
 const ACTIONS = {
   // בית
-  new: () => goSetup(),
+  new() {
+    // בלי אינטרנט אין טעם לנסות Firebase: עוברים למשחק אופליין
+    S.nextOffline = isOnline && navigator.onLine === false;
+    if (S.nextOffline) toast("אין אינטרנט, מתחילים משחק אופליין", 3200);
+    goSetup();
+  },
+  offline() {
+    S.nextOffline = true;
+    goSetup();
+  },
   "new-from-room"() {
-    save(KEY_LAST_ROOM, null, "session");
+    S.nextOffline = S.offline; // ממשיכים באותו סוג משחק: אופליין נשאר אופליין
+    forgetLastRoom();
     detach();
     goSetup();
   },
@@ -1424,17 +1485,25 @@ async function init() {
   const params = new URLSearchParams(location.search);
   const fromLink = params.get("room");
   const code = R.isValidCode(fromLink) ? fromLink : load(KEY_LAST_ROOM, "session");
+  const offline = !R.isValidCode(fromLink) && load(KEY_LAST_OFFLINE, "session") === true;
   if (fromLink !== null) history.replaceState(null, "", location.pathname);
   if (R.isValidCode(code)) {
-    const res = await joinRoom(code);
+    const res = await joinRoom(code, { offline });
     if (res.ok) return;
-    if (res.reason === "notfound") save(KEY_LAST_ROOM, null, "session");
+    if (res.reason === "notfound") forgetLastRoom();
     goHome();
     if (res.reason === "denied") toast(DENIED_MSG, 6000);
     else if (fromLink !== null) toast(res.reason === "notfound" ? "לא נמצא חדר עם הקוד הזה" : "לא הצלחנו להתחבר לחדר", 3200);
     return;
   }
   goHome();
+}
+
+// כשהחיבור לאינטרנט נקטע או חוזר ואנחנו במסך הבית, מעדכנים אותו כדי שכפתור האופליין יתאים
+for (const ev of ["online", "offline"]) {
+  window.addEventListener(ev, () => {
+    if (document.body.dataset.screen === "home") goHome();
+  });
 }
 
 init();

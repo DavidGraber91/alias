@@ -11,6 +11,14 @@ function read(key) {
   }
 }
 
+export function forget(code) {
+  try {
+    localStorage.removeItem(keyOf(code));
+  } catch {
+    /* אחסון חסום */
+  }
+}
+
 export function open(code) {
   const key = keyOf(code);
   const listeners = new Set();
