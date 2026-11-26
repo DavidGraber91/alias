@@ -844,3 +844,30 @@ dialog:modal { overscroll-behavior: contain; }
 dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
 .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-actions:has(:only-child) { grid-template-columns: 1fr; }
+
+/* ───────── בנים נגד בנות, וקישורים שנראים ככפתורים ───────── */
+
+a.btn { text-decoration: none; }
+
+/* הכותרת "בנים נגד בנות" ארוכה יותר מ"אליאס", אז קטנה יותר כדי שלא תישבר לשורות */
+.title-sticker.long {
+  padding: 8px 26px 18px;
+  font-size: clamp(2.4rem, 13vw, 3.8rem);
+}
+
+/* מי מסביר/ה בתור הקרוב, ומאיזה עולם המילים */
+.turn-who {
+  font-size: 1.5rem;
+  font-weight: 900;
+  text-shadow: 0 3px 0 rgba(26, 11, 61, 0.55);
+}
+.pill.world { background: var(--mint); }
+
+/* דף תוכן בתוך מסך הבית (שאלות ותשובות). אותם כללים כמו ב-how-to-play.html. */
+.doc { display: grid; gap: 16px; -webkit-user-select: text; user-select: text; }
+.doc h2 { font-size: 1.3rem; }
+.doc ol, .doc ul { display: grid; gap: 8px; margin: 0; padding-inline-start: 24px; }
+.doc details { padding: 10px 0; border-top: 2px solid rgba(26, 11, 61, 0.15); }
+.doc summary { cursor: pointer; font-weight: 800; }
+.doc details p { margin-top: 8px; }
+.doc a:not(.btn) { color: inherit; font-weight: 700; }

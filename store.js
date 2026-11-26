@@ -15,12 +15,6 @@ import { firebaseConfig } from "./firebase-config.js";
 
 export const isOnline = Boolean(firebaseConfig);
 
-// מתחיל לטעון את Firebase ברקע (נקרא בפתיחת האפליקציה), כדי שיצירת חדר והצטרפות יהיו מהירות
-export function preload() {
-  if (!firebaseConfig) return;
-  import("./store-firebase.js").then((m) => m.preload(firebaseConfig)).catch(() => {});
-}
-
 export async function openStore(code) {
   if (firebaseConfig) {
     const { open } = await import("./store-firebase.js");

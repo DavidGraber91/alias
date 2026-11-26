@@ -2,20 +2,56 @@
 // המצב כולו הוא אובייקטים פשוטים, ולכן אפשר לשמור אותו ב-localStorage כמו שהוא
 // וקל לבדוק אותו (ראו tests/game.test.js).
 
-import { STR, t } from "./strings.js";
-
 export const LIMITS = { minTeams: 2, maxTeams: 6, minRounds: 1, maxRounds: 10 };
 export const TURN_SECONDS_OPTIONS = [30, 45, 60, 90];
 export const LAST_CHANCE_OPTIONS = [10, 20, 0]; // 0 = עד שהמסביר/ה לוחץ/ת
 const SECONDS_PER_WORD = 8; // הערכה גסה: כמה מילים עוברות בתור
 
-export const defaultTeamName = (i) => t(STR.teams.default, { letter: STR.teams.letters[i] ?? i + 1 });
+const LETTERS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳"];
+export const defaultTeamName = (i) => `קבוצה ${LETTERS[i] ?? i + 1}`;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+
+/* ───────────── מצב "בנים נגד בנות" ─────────────
+   אותו משחק, אותו ניקוד ואותן תורות. ההבדל היחיד: כל מילה מסומנת בעולם שהיא באה ממנו
+   ("female" = עולם הבנות, "male" = עולם הבנים), והמסביר/ה מקבל/ת תמיד מילה מהעולם של המין השני.
+     format "teams":   שתי קבוצות. קבוצה 0 = הבנים (מסביר בן), קבוצה 1 = הבנות (מסבירה בת).
+     format "couples": כל קבוצה היא זוג. בכל תור של הזוג המסביר/ה מתחלף/ת בין הבן לבת. */
+
+export const GENDER_FORMATS = ["teams", "couples"];
+const GENDER_TEAM_NAMES = ["הבנים", "הבנות"];
+
+export const isGender = (settings) => settings?.mode === "gender";
+export const oppositeGender = (g) => (g === "male" ? "female" : "male");
+
+export function defaultNameFor(settings, i) {
+  if (!isGender(settings)) return defaultTeamName(i);
+  if (settings.format === "couples") return `זוג ${LETTERS[i] ?? i + 1}`;
+  return GENDER_TEAM_NAMES[i] ?? defaultTeamName(i);
+}
+
+// מי מסביר/ה בתור מספר turnIndex: "male" (בן) או "female" (בת). null כשזה לא מצב בנים נגד בנות.
+export function explainerGenderAt(game, turnIndex) {
+  if (!isGender(game.settings)) return null;
+  const teamIdx = game.queue[turnIndex];
+  if (teamIdx === undefined) return null;
+  if (game.settings.format !== "couples") return teamIdx === 0 ? "male" : "female";
+  // זוגות: הזוג הראשון מתחיל בבן, השני בבת, וכן הלאה. בכל תור נוסף של אותו זוג המין מתחלף.
+  const before = game.queue.slice(0, turnIndex).filter((t) => t === teamIdx).length;
+  const first = teamIdx % 2 === 0 ? "male" : "female";
+  return before % 2 === 0 ? first : oppositeGender(first);
+}
+
+// כמה מילים יש מכל עולם ברמות שנבחרו
+export function genderCounts(words, levelIds) {
+  const counts = { male: 0, female: 0 };
+  for (const w of poolFor(words, levelIds)) if (w.gender in counts) counts[w.gender] += 1;
+  return counts;
+}
 
 /* ───────────── הגדרות ───────────── */
 
-export function defaultSettings(levelIds = []) {
-  return {
+export function defaultSettings(levelIds = [], mode = "classic") {
+  const s = {
     teams: [defaultTeamName(0), defaultTeamName(1)],
     rounds: 3,
     turnSeconds: 60,
@@ -25,16 +61,31 @@ export function defaultSettings(levelIds = []) {
     lastChanceSeconds: 10, // 10 | 20 | 0 (עד לחיצה)
     stealPoints: 1, // ניקוד לקבוצה אחרת שניחשה בהזדמנות האחרונה: 1 או 2
   };
+  if (mode === "gender") {
+    s.mode = "gender";
+    s.format = "teams";
+    s.teams = [defaultNameFor(s, 0), defaultNameFor(s, 1)];
+  }
+  return s;
 }
 
 // מנקה הגדרות שנטענו מהאחסון המקומי (או נערכו ידנית) כך שלא ישברו את המשחק.
-export function sanitizeSettings(raw, validLevelIds = []) {
-  const d = defaultSettings(validLevelIds);
+export function sanitizeSettings(raw, validLevelIds = [], mode = "classic") {
+  const d = defaultSettings(validLevelIds, mode);
   const s = { ...d, ...(raw && typeof raw === "object" ? raw : {}) };
 
+  if (mode === "gender") {
+    s.mode = "gender";
+    s.format = GENDER_FORMATS.includes(s.format) ? s.format : d.format;
+  } else {
+    delete s.mode;
+    delete s.format;
+  }
+
   let teams = Array.isArray(s.teams) ? s.teams.map((t) => String(t ?? "")) : d.teams;
-  teams = teams.slice(0, LIMITS.maxTeams);
-  while (teams.length < LIMITS.minTeams) teams.push(defaultTeamName(teams.length));
+  const gendersTeams = mode === "gender" && s.format === "teams";
+  teams = teams.slice(0, gendersTeams ? 2 : LIMITS.maxTeams);
+  while (teams.length < LIMITS.minTeams) teams.push(defaultNameFor(s, teams.length));
   s.teams = teams;
 
   s.rounds = clamp(Math.round(Number(s.rounds)) || d.rounds, LIMITS.minRounds, LIMITS.maxRounds);
@@ -93,10 +144,10 @@ export function shuffle(arr, rng = Math.random) {
 
 /* ───────────── יצירת משחק ───────────── */
 
-function normalizeTeamNames(names) {
+function normalizeTeamNames(settings) {
   const seen = new Map();
-  return names.map((raw, i) => {
-    const name = String(raw ?? "").trim().slice(0, 20) || defaultTeamName(i);
+  return settings.teams.map((raw, i) => {
+    const name = String(raw ?? "").trim().slice(0, 20) || defaultNameFor(settings, i);
     const n = (seen.get(name) ?? 0) + 1;
     seen.set(name, n);
     return n > 1 ? `${name} (${n})` : name;
@@ -104,9 +155,16 @@ function normalizeTeamNames(names) {
 }
 
 export function createGame(settings, words, rng = Math.random) {
-  const names = normalizeTeamNames(settings.teams);
-  const pool = poolFor(words, settings.levels);
-  if (pool.length === 0) throw new Error(STR.errors.noWords);
+  const names = normalizeTeamNames(settings);
+  let pool = poolFor(words, settings.levels);
+  if (isGender(settings)) {
+    // רק מילים שמסומנות בעולם ברור, ולכל עולם צריך להיות לפחות מילה אחת
+    pool = pool.filter((w) => w.gender === "male" || w.gender === "female");
+    if (!pool.some((w) => w.gender === "male") || !pool.some((w) => w.gender === "female")) {
+      throw new Error("אין מילים משני העולמות ברמות שנבחרו");
+    }
+  }
+  if (pool.length === 0) throw new Error("אין מילים ברמות שנבחרו");
 
   // תור = קבוצה אחת. בכל סיבוב כל קבוצה משחקת פעם אחת.
   const queue = [];
@@ -140,13 +198,34 @@ export function roundInfo(game) {
 
 /* ───────────── תור ───────────── */
 
-function drawEntry(game, rng = Math.random) {
-  if (game.deck.length === 0) {
-    // המילים נגמרו: מערבבים מחדש את מה שכבר יצא
-    game.deck = shuffle(game.used, rng);
-    game.used = [];
+// בבנים נגד בנות: מושכים מילה מהעולם שהמסביר/ה צריך/ה לקבל (wordGender). כשהמילים של העולם הזה
+// נגמרו, מערבבים מחדש רק את המילים שכבר יצאו מאותו עולם.
+function takeWord(game, rng) {
+  const wanted = game.turn.wordGender;
+  if (!wanted) {
+    if (game.deck.length === 0) {
+      // המילים נגמרו: מערבבים מחדש את מה שכבר יצא
+      game.deck = shuffle(game.used, rng);
+      game.used = [];
+    }
+    return game.deck.pop();
   }
-  const w = game.deck.pop();
+  const lastOf = () => {
+    for (let i = game.deck.length - 1; i >= 0; i--) if (game.deck[i].gender === wanted) return i;
+    return -1;
+  };
+  let at = lastOf();
+  if (at === -1) {
+    const back = game.used.filter((w) => w.gender === wanted);
+    game.used = game.used.filter((w) => w.gender !== wanted);
+    game.deck.push(...shuffle(back, rng));
+    at = lastOf();
+  }
+  return at === -1 ? game.deck.pop() : game.deck.splice(at, 1)[0];
+}
+
+function drawEntry(game, rng = Math.random) {
+  const w = takeWord(game, rng);
   game.used.push(w);
   const entry = { word: w.word, level: w.level, result: null, teamId: null, lastChance: false };
   game.turn.entries.push(entry);
@@ -155,6 +234,11 @@ function drawEntry(game, rng = Math.random) {
 
 export function startTurn(game, rng = Math.random) {
   game.turn = { teamIdx: currentTeamIdx(game), entries: [] };
+  const explainerGender = explainerGenderAt(game, game.turnIndex);
+  if (explainerGender) {
+    game.turn.explainerGender = explainerGender; // מי מסביר/ה: "male" | "female"
+    game.turn.wordGender = oppositeGender(explainerGender); // מאיזה עולם המילים
+  }
   return drawEntry(game, rng);
 }
 
